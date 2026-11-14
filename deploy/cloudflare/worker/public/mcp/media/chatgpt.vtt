@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Start and pair PCRC on your Windows PC.
+
+00:00:05.000 --> 00:00:09.000
+Open ChatGPT Plugins and choose Add custom MCP server.
+
+00:00:09.000 --> 00:00:15.100
+Enter the name and the public PCRC server URL. Keep OAuth selected.
+
+00:00:15.100 --> 00:00:19.900
+Review the warning before choosing Create as a plugin.
+
+00:00:19.900 --> 00:00:22.800
+Choose Connect PC Remote Commander.
+
+00:00:22.800 --> 00:00:26.900
+Review the account and permissions on the PCRC consent screen.
+
+00:00:26.900 --> 00:00:31.900
+In a new chat, select PCRC and try a read-only connection check.

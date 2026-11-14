@@ -1,0 +1,35 @@
+{
+  "source": "https://github.com/cloudflare/cloudflared.git",
+  "source_commit": "18cdfe0a6fc7b72a0702d255a1f984e776ce0498",
+  "version": "2026.10.0-jan.1",
+  "go_version": "go1.26.9",
+  "toolchain_linux_amd64_sha256": "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d",
+  "go_mod_sha256": "25d2d27d6b2c7491b02dd908aedbd6f20c30e8d5ec8b48a301bfc2ab50b5fe61",
+  "go_sum_sha256": "f6f3bd9a5902e0409257252bba4f9e5b23a564ee286f0481689ea3f6d53ba7b8",
+  "flags": "-s -w -X main.Version=2026.10.0-jan.1 -X main.BuildTime=2026-10-15T00:00:00Z -X github.com/cloudflare/cloudflared/cmd/cloudflared/updater.BuiltForPackageManager=jan",
+  "artifacts": {
+    "2026.10.0-jan.1-cloudflared-linux-amd64": {
+      "sha256": "35a8457b6ad29707d2390147c86ae9304040f8c6c9c03e8a1e1f62ceafde31f2",
+      "size": 27717794,
+      "imports_sha256": "f78624202c2bdb4b0f1eb09424dea4b0e728e6ef3c1111b90bd1b2dce577b7b8",
+      "imports_file": "patched-linux-amd64-imports.txt",
+      "go_version": "go1.26.9"
+    },
+    "2026.10.0-jan.1-cloudflared-windows-amd64.exe": {
+      "sha256": "167cc255e0142a4fe2ebc3d5164dd792db2ded16dd798fad9149b674ebf6f608",
+      "size": 28167168,
+      "imports_sha256": "9af906011ef995f48dd9996c06a75819ee3db6c659ceacd6a2d17c052a54e0fc",
+      "imports_file": "patched-windows-amd64-imports.txt",
+      "go_version": "go1.26.9"
+    },
+    "2026.10.0-jan.1-cloudflared-linux-arm64": {
+      "sha256": "f09a9c39fd32d7a3148550b35bbffc40e63ba1fdc5ce6bacc557ec4548c2fd46",
+      "size": 25886882,
+      "imports_sha256": "a0b260009ae043b6a83aa541058e46c83dda75795c9f502aa1db643671697e07",
+      "imports_file": "patched-linux-arm64-imports.txt",
+      "go_version": "go1.26.9"
+    }
+  },
+  "upstream_application_source_changes": false,
+  "publisher": "JAN security rebuild; not an official Cloudflare-signed release"
+}

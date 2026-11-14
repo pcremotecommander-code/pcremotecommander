@@ -1,0 +1,43 @@
+{
+  "status": "prepared_not_launched",
+  "provider": "Oracle Cloud Infrastructure",
+  "display_name": "PCRC-Development",
+  "region": "EXISTING_TENANCY_HOME_REGION",
+  "shape": "VM.Standard.A1.Flex",
+  "shape_config": {
+    "ocpus": 2,
+    "memory_in_gbs": 12
+  },
+  "image": {
+    "operating_system": "Ubuntu",
+    "version": "24.04",
+    "architecture": "aarch64",
+    "always_free_eligible_required": true,
+    "image_ocid": null
+  },
+  "boot_volume_gib": 50,
+  "new_instances": 1,
+  "network": {
+    "public_application_ports": [],
+    "ssh_port": 22,
+    "ssh_source_cidr": "REPLACE_WITH_OPERATOR_PUBLIC_IP/32",
+    "nat_gateway": false,
+    "load_balancer": false
+  },
+  "free_tier_checks": {
+    "home_region_required": true,
+    "verify_existing_A1_usage_before_launch": true,
+    "maximum_aggregate_A1_ocpus": 2,
+    "maximum_aggregate_A1_memory_gib": 12,
+    "maximum_aggregate_free_boot_and_block_storage_gib": 200,
+    "paid_fallback_allowed": false,
+    "account_upgrade_allowed": false,
+    "verify_each_console_cost_item_before_launch": true
+  },
+  "activation": {
+    "automatically_start_JAN": false,
+    "existing_production_gates_required": true
+  },
+  "account_connection_verified": false,
+  "cloud_resources_created": false
+}

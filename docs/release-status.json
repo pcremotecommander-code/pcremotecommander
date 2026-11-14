@@ -1,0 +1,67 @@
+{
+  "production_ready": false,
+  "note": "Public source example only; no deployment acceptance evidence is bundled.",
+  "gates": {
+    "chatgpt_tools_verified": {
+      "passed": false,
+      "evidence": null
+    },
+    "container_built_and_scanned": {
+      "passed": false,
+      "evidence": null
+    },
+    "live_tunnel_authenticated": {
+      "passed": false,
+      "evidence": null
+    },
+    "recovery_and_disconnect_verified": {
+      "passed": false,
+      "evidence": null
+    },
+    "target_host_hardened": {
+      "passed": false,
+      "evidence": null
+    },
+    "upstream_tunnel_findings_reviewed": {
+      "passed": false,
+      "evidence": null
+    }
+  },
+  "public_multiuser": {
+    "production_ready": false,
+    "gates": {
+      "client_interoperability": {
+        "passed": false,
+        "evidence": null
+      },
+      "desktop_distribution": {
+        "passed": false,
+        "evidence": null
+      },
+      "distributed_abuse_controls": {
+        "passed": false,
+        "evidence": null
+      },
+      "independent_security_review": {
+        "passed": false,
+        "evidence": null
+      },
+      "live_two_account_isolation": {
+        "passed": false,
+        "evidence": null
+      },
+      "local_two_account_runtime": {
+        "passed": false,
+        "evidence": null
+      },
+      "operations_and_recovery": {
+        "passed": false,
+        "evidence": null
+      },
+      "target_host_hardened": {
+        "passed": false,
+        "evidence": null
+      }
+    }
+  }
+}

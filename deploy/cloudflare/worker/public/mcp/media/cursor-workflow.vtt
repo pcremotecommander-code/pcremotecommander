@@ -1,0 +1,11 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:03.000
+Show me where this project starts.
+
+00:00:03.000 --> 00:00:04.533
+PCRC checks sample files in the approved workspace.
+
+00:00:04.533 --> 00:00:10.000
+Start with src/main.ts
+README.md explains setup. tests/ covers the app.

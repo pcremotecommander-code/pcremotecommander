@@ -1,0 +1,4 @@
+interface:
+  display_name: "PCRC"
+  short_description: "Use PCRC MCP and CLI with verified permissions"
+  default_prompt: "Use $pcrc-commander to inspect the connection and complete my authorized workspace task."

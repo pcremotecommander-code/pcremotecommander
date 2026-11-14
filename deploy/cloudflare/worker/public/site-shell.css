@@ -1,0 +1,21 @@
+/* Shared site navigation and footer. */
+html{scroll-padding-top:90px}
+header.pcrc-island{box-sizing:border-box;position:sticky;top:10px;z-index:80;margin:12px auto 22px;width:min(960px,calc(100% - 24px));min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 12px;border:1px solid #bfdbf559;border-radius:999px;color:#f6fbff;background:rgba(18,44,68,.93);box-shadow:0 8px 30px #071a3133,inset 0 1px #fff2;backdrop-filter:blur(22px) saturate(1.3);transition:transform .24s ease,opacity .24s ease;font:600 14px/1.35 system-ui}
+.pcrc-island.is-away{transform:translateY(calc(-100% - 22px));opacity:0;pointer-events:none}
+header.pcrc-island :is(a,summary){box-sizing:border-box;display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:6px 12px;margin:0;border:0;border-radius:999px;background:transparent;color:inherit;text-decoration:none;cursor:pointer;list-style:none;box-shadow:none;font:inherit}
+header.pcrc-island summary::-webkit-details-marker{display:none}
+header.pcrc-island :is(a,summary):hover{background:#ffffff18;color:white}
+header.pcrc-island :focus-visible{outline:2px solid #a7dbff;outline-offset:2px}
+header.pcrc-island .island-brand{padding:2px 6px;font-weight:750}
+.island-brand img{width:36px;height:36px;object-fit:contain}
+header.pcrc-island details{margin:0;padding:0;border:none;background:none}
+.island-wide{display:flex;align-items:center;gap:2px}.island-mini{display:none}
+header.pcrc-island .island-cta{color:#102d46;background:#cce6f8}
+.island-list{position:absolute;right:8px;top:calc(100% + 6px);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:min(365px,calc(100vw - 38px));max-height:calc(100dvh - 110px);overflow:auto;padding:10px;border:1px solid #718ca4;border-radius:20px;background:#16344f;box-shadow:0 12px 24px #061c3038}
+header.pcrc-island .island-list a{border-radius:10px}
+.site-home .notice{position:static;box-sizing:border-box;width:fit-content;max-width:calc(100% - 32px);margin:10px auto 0;padding:7px 15px;border:1px solid #7899b766;border-radius:20px;background:#708aa022;line-height:1.4;text-align:center}
+.pcrc-site :is(.card,.callout,.reference,.directory-grid section,.table-scroll,.comparison-scroll,.hero-film){border-radius:22px}
+.pcrc-site .site-footer .footer-grid nav a,.pcrc-site .site-footer .footer-bottom a,.pcrc-site .site-footer .footer-social a,.pcrc-site .site-footer .footer-grid nav a:hover,.pcrc-site .site-footer .footer-bottom a:hover,.pcrc-site .site-footer .footer-social a:hover{background:transparent;border:0;border-radius:0;box-shadow:none;color:inherit;padding:5px 0;text-decoration:none}
+.pcrc-site .site-footer .footer-grid nav a:hover,.pcrc-site .site-footer .footer-bottom a:hover{text-decoration:underline;text-underline-offset:.22em}
+@media(max-width:760px){.island-wide{display:none}.island-mini{display:block}header.pcrc-island{top:6px;margin:8px auto 16px;min-height:54px;padding:3px 9px}header.pcrc-island .island-mini>summary{background:#ffffff14}.island-list{grid-template-columns:minmax(0,1fr);width:min(280px,calc(100vw - 36px))}}
+@media(prefers-reduced-motion:reduce){header.pcrc-island{transition:none}}

@@ -1,0 +1,24 @@
+{
+  "name": "pcremotecommander",
+  "version": "0.7.0-beta.43",
+  "description": "PC Remote Commander beta launcher with checksum-pinned Windows and Linux/macOS setup",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "bin": {
+    "pcremotecommander": "bin/pcremotecommander.cjs"
+  },
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta"
+  },
+  "files": [
+    "bin"
+  ]
+}

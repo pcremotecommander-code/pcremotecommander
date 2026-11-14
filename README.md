@@ -70,7 +70,7 @@ Remote MCP endpoint — choose **OAuth**:
 https://pc-remote-commander.pcremotecommander.workers.dev/mcp
 ```
 
-The dashboard's **Copy command → Connect AI → Verify → Dashboard** flow shows where to paste this URL. Follow the [client setup guide](docs/install.md), use the same PCRC account for pairing and client consent, and check connection status before a write. Control requires `pcrc:read pcrc:control` and the device's approved local capabilities. Client subscriptions and workspace restrictions apply separately.
+The dashboard's **Choose method → Start on device → Verify → Connect AI** flow shows where to paste this URL. Follow the [client setup guide](docs/install.md), use the same PCRC account for pairing and client consent, and check connection status before a write. Control requires `pcrc:read pcrc:control` and the device's approved local capabilities. Client subscriptions and workspace restrictions apply separately.
 
 MCP, CLI and advisory workflow skills are installed together. No separate command is needed for each tool. Skills suggest steps; they do not grant permissions. [CLI and skills reference](docs/skills.md).
 
@@ -86,4 +86,19 @@ MCP, CLI and advisory workflow skills are installed together. No separate comman
 
 The public npm beta supports Windows. A verified public Linux/macOS installer, universal multimedia editing and public directory approval are not claimed. UTCP is a separate development-only prototype and is not enabled for public use.
 
-This public repository contains guides and the small launcher, not hosted gateway or device-runtime source. Do not post credentials, pairing links, private configuration or user data in issues. Support: [janagiri3297@gmail.com](mailto:janagiri3297@gmail.com).
+This repository includes PCRC runtime, MCP server, gateway source, tests and launchers. Source availability does not change the proprietary license; see LICENSE.txt. See [development setup](docs/development.md), [release process](docs/release-process.md) and [acceptance matrix](docs/acceptance-matrix.md). Do not post credentials, pairing links, private configuration or user data in issues. Support: [pcremotecommander@gmail.com](mailto:pcremotecommander@gmail.com).
+
+
+## Source layout
+
+| Folder | Purpose |
+| --- | --- |
+| `src/jan_mcp_commander/` | Python agent and local tools; namespace retained for compatibility |
+| `deploy/mcp-task-server/` | Public MCP catalog, schemas and tool bridge |
+| `deploy/cloudflare/worker/` | Gateway, dashboard and sanitized configuration examples |
+| `deploy/npm/` | Versioned launchers and relay support |
+| `scripts/` | Build and release validation commands |
+| `tests/` | Synthetic Python regression tests |
+| `docs/` | Setup, security, development and acceptance guidance |
+
+`main` holds accepted release work. `next` holds the runtime source baseline and upcoming verified batches until promotion. See the [release process](docs/release-process.md). Legacy imports and command aliases remain compatible; professional names are used for new documentation and release records.

@@ -1,0 +1,61 @@
+{
+  "name": "pc-remote-commander-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": [
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "assets": {
+    "directory": "./public"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "JAN_PUBLIC_ORIGIN": "https://pc-remote-commander-staging.example.workers.dev",
+    "JAN_ORIGIN": "https://unused-development.trycloudflare.com",
+    "GITHUB_CLIENT_ID": "",
+    "ALLOWED_GITHUB_ID": "1234",
+    "JAN_AUTO_ORIGIN": "1",
+    "JAN_RELAY_ENABLED": "1",
+    "JAN_PAIRING_ENABLED": "1",
+    "JAN_MULTI_USER_ENABLED": "1",
+    "JAN_SITE_ROLE": "public",
+    "PADDLE_PRICE_ID": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000004"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PACKAGE_BUCKET",
+      "bucket_name": "pcrc-example-packages-4"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEVICES",
+        "class_name": "JanDeviceStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "public-staging-device-store-v1",
+      "new_sqlite_classes": [
+        "JanDeviceStore"
+      ]
+    }
+  ]
+}

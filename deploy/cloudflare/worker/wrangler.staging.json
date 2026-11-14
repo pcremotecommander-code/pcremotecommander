@@ -1,0 +1,46 @@
+{
+  "name": "pcrc-development",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": [
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "JAN_PUBLIC_ORIGIN": "https://pcrc-development.example.workers.dev",
+    "JAN_ORIGIN": "https://unused-development.trycloudflare.com",
+    "GITHUB_CLIENT_ID": "",
+    "ALLOWED_GITHUB_ID": "1234",
+    "JAN_AUTO_ORIGIN": "1",
+    "JAN_RELAY_ENABLED": "1",
+    "JAN_PAIRING_ENABLED": "1",
+    "JAN_MULTI_USER_ENABLED": "1",
+    "JAN_BETA_GITHUB_IDS": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000005"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEVICES",
+        "class_name": "JanDeviceStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "staging-device-store-v1",
+      "new_sqlite_classes": [
+        "JanDeviceStore"
+      ]
+    }
+  ]
+}

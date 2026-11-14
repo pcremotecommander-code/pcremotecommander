@@ -1,0 +1,59 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+ssh_pwauth: false
+disable_root: true
+packages:
+- ca-certificates
+- curl
+- python3
+- unzip
+write_files:
+- path: /usr/local/sbin/jan-prepare-oracle
+  owner: root:root
+  permissions: '0700'
+  content: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    umask 027
+    [[ "$(id -u)" == 0 ]] || { printf '%s\n' 'Run only through first-boot cloud-init on the new Oracle VM.' >&2; exit 1; }
+    . /etc/os-release
+    [[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 ]] || { printf '%s\n' 'This template targets a new Ubuntu 24.04 VM.' >&2; exit 1; }
+    [[ "$(dpkg --print-architecture)" == arm64 ]] || { printf '%s\n' 'Oracle Ampere A1 requires the ARM64 image.' >&2; exit 1; }
+    if [[ -f /etc/jan-oracle-host-prepared ]]; then
+      docker info >/dev/null
+      docker compose version
+      exit 0
+    fi
+    [[ ! -e /srv/jan ]] || { printf '%s\n' 'Existing /srv/jan detected; refusing to alter an existing deployment.' >&2; exit 1; }
+    id ubuntu >/dev/null
+    install -d -m 0755 /etc/apt/keyrings
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod 0644 /etc/apt/keyrings/docker.asc
+    cat > /etc/apt/sources.list.d/docker.sources <<'REPO'
+    Types: deb
+    URIs: https://download.docker.com/linux/ubuntu
+    Suites: noble
+    Components: stable
+    Architectures: arm64
+    Signed-By: /etc/apt/keyrings/docker.asc
+    REPO
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl enable --now docker
+    install -d -o root -g root -m 0755 /srv/jan
+    install -d -o ubuntu -g ubuntu -m 0750 /srv/jan/application
+    install -d -o 10001 -g 10001 -m 0750 /srv/jan/workspace
+    printf '%s\n' 'JAN validation workspace. Add only files approved for remote access.' > /srv/jan/workspace/README.txt
+    chown 10001:10001 /srv/jan/workspace/README.txt
+    chmod 0640 /srv/jan/workspace/README.txt
+    docker info >/dev/null
+    docker compose version
+    printf '%s\n' 'Host preparation finished. JAN is not installed or running; upload the reviewed package and complete the deployment gates.' > /etc/jan-oracle-host-prepared
+    chmod 0644 /etc/jan-oracle-host-prepared
+runcmd:
+- - bash
+  - /usr/local/sbin/jan-prepare-oracle
+final_message: Oracle host preparation finished. JAN activation still requires release
+  gates; check cloud-init status and logs.

@@ -1,0 +1,31 @@
+{
+  "pcremotecommander": {
+    "id": "pcremotecommander@0.7.0-beta.14",
+    "name": "pcremotecommander",
+    "version": "0.7.0-beta.14",
+    "size": 3876,
+    "unpackedSize": 9751,
+    "shasum": "e6857cb036584226e882ee13fabd98a608a387a4",
+    "integrity": "sha512-2FOyIKNTTCUPoLakv1DHH5DcFdwiCp4RAn2eJy0PW7XgGiL1EV9t/JBG74mMmDXGyeCh5rIPYuM8qxkrHkHn9Q==",
+    "filename": "pcremotecommander-0.7.0-beta.14.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 1296,
+        "mode": 420
+      },
+      {
+        "path": "bin/pcremotecommander.cjs",
+        "size": 7970,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 485,
+        "mode": 420
+      }
+    ],
+    "entryCount": 3,
+    "bundled": []
+  }
+}

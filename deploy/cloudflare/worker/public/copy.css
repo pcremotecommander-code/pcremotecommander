@@ -1,0 +1,24 @@
+.brand img{width:44px!important;height:44px!important;object-fit:cover!important;border-radius:50%!important;background:#17142e!important;padding:0!important;flex-shrink:0}
+.copy-block{position:relative;min-width:0;margin:18px 0}
+.copy-block>pre,.copy-block>code.command,.copy-block>code.endpoint{margin:0;padding:48px 18px 20px;text-align:left;display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+.copy-button{position:absolute;top:10px;right:10px;display:grid;place-items:center;width:34px;height:34px;padding:7px;cursor:pointer;border:1px solid #aaa0d54d;border-radius:8px;background:#292440;color:#e4deff}
+.copy-button:hover{background:#3b315c;color:#5af0ba}.copy-button:focus-visible{outline:3px solid #5af0ba;outline-offset:3px}
+.copy-button svg{width:18px;height:18px;fill:#292440;stroke:currentColor;stroke-width:1.6}
+.copy-feedback{display:block;color:#5af0ba;font:12px/1.5 system-ui,sans-serif;margin-top:5px;min-height:0}.copy-feedback:empty{display:none}
+
+.copy-block.command-block{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:6px;border:1px solid #8f76ee66;border-radius:12px;background:#090c21;padding:6px}
+.copy-block.command-block>code{padding:10px 12px;border:0;border-radius:0;background:none;white-space:pre;overflow-x:auto;overflow-wrap:normal;font:14px/1.6 Consolas,monospace;min-width:0}
+.command-block .copy-button{position:static;justify-self:center;margin:0}
+.command-block .copy-feedback{grid-column:1/-1;margin:0 10px 4px}
+
+.card .copy-block{display:grid;grid-template-columns:minmax(0,1fr) 34px;row-gap:3px;margin-top:8px}
+.card .copy-button{position:static;grid-column:2;grid-row:1;justify-self:end;width:30px;height:30px;padding:6px}
+.card .copy-feedback{grid-column:1/-1;grid-row:2;text-align:right;min-height:14px;margin:0;font-size:10px;line-height:14px}
+.card .copy-feedback:empty{display:block}
+.card .copy-block>pre{grid-column:1/-1;grid-row:3;padding:13px;margin:0}
+
+.card{position:relative}.card>small{display:block;padding-right:44px;min-height:28px;line-height:28px}
+.card>.copy-button{position:absolute;top:14px;right:16px;width:30px;height:30px;padding:6px}
+.card>.copy-feedback{position:absolute;top:45px;right:16px;margin:0;font-size:10px;line-height:13px;text-align:right;max-width:160px}
+.card .copy-block{display:block;margin-top:10px}
+.card .copy-block>pre{padding:13px}

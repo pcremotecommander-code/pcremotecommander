@@ -1,0 +1,34 @@
+{
+  "name": "pc-remote-commander-ops-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": [
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "JAN_PUBLIC_ORIGIN": "https://pc-remote-commander-ops-staging.example.workers.dev",
+    "JAN_ORIGIN": "https://unused-development.trycloudflare.com",
+    "GITHUB_CLIENT_ID": "",
+    "ALLOWED_GITHUB_ID": "1234",
+    "JAN_MULTI_USER_ENABLED": "1",
+    "JAN_SITE_ROLE": "owner",
+    "PADDLE_PRICE_ID": ""
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEVICES",
+        "class_name": "JanDeviceStore",
+        "script_name": "pc-remote-commander-staging"
+      }
+    ]
+  },
+  "assets": {
+    "directory": "./owner-public"
+  }
+}

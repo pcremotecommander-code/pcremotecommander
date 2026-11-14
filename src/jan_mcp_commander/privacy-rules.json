@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "name": "private_key",
+      "pattern": "-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY",
+      "flags": "i"
+    },
+    {
+      "name": "github_token",
+      "pattern": "\\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\\b",
+      "flags": ""
+    },
+    {
+      "name": "provider_token",
+      "pattern": "\\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{35}|xox[baprs]-[A-Za-z0-9-]{20,255}|(?:sk|rk)[_-](?:live_|test_)?[A-Za-z0-9_-]{24,255})\\b",
+      "flags": ""
+    },
+    {
+      "name": "bearer_token",
+      "pattern": "\\bbearer[ \\t]+[A-Za-z0-9._~+/-]{12,256}",
+      "flags": "i"
+    },
+    {
+      "name": "jwt",
+      "pattern": "\\beyJ[A-Za-z0-9_-]{8,256}\\.[A-Za-z0-9_-]{8,2048}\\.[A-Za-z0-9_-]{16,512}\\b",
+      "flags": ""
+    },
+    {
+      "name": "aadhaar",
+      "pattern": "\\b(?:aadhaar|aadhar)(?:[ _-]*(?:number|no))?[\"']?[ \\t]*[:=][ \\t]*[\"']?[2-9][0-9]{3}[ -]?[0-9]{4}[ -]?[0-9]{4}\\b",
+      "flags": "i"
+    },
+    {
+      "name": "pan",
+      "pattern": "\\b(?:pan|permanent[ _-]*account[ _-]*number)(?:[ _-]*(?:number|no))?[\"']?[ \\t]*[:=][ \\t]*[\"']?[A-Z]{5}[0-9]{4}[A-Z]\\b",
+      "flags": "i"
+    },
+    {
+      "name": "ssn",
+      "pattern": "\\b(?:ssn|social[ _-]*security[ _-]*(?:number|no))[\"']?[ \\t]*[:=][ \\t]*[\"']?[0-9]{3}[ -]?[0-9]{2}[ -]?[0-9]{4}\\b",
+      "flags": "i"
+    },
+    {
+      "name": "numeric_credential_label",
+      "pattern": "\\b(?:pin|otp|cvv|cvc)(?:[ _-]+(?:number|code))?[ _-]+(?:(?:is|equals)[ \\t]+)?[0-9]{3,8}\\b",
+      "flags": "i"
+    }
+  ],
+  "labeled_secret": {
+    "pattern": "(?:^|[\\s{\"';,/_-])(?:password|passwd|passphrase|pwd|pin|otp|one[ _-]?time[ _-]?(?:password|code)|cvv|cvc|api[ _-]?key|api[ _-]?token|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|secret(?:[ _-]?(?:key|id))?|token)[\"']?[ \\t]*[:=][ \\t]*[\"']?([^\\s\"'`;,{\\r\\n}]{1,256})",
+    "flags": "i",
+    "ignore_values": [
+      "none",
+      "null",
+      "undefined",
+      "true",
+      "false",
+      "str",
+      "string",
+      "int",
+      "integer",
+      "float",
+      "bool",
+      "boolean",
+      "bytes",
+      "object",
+      "dict",
+      "list"
+    ],
+    "unquoted_call_pattern": "[A-Za-z_][A-Za-z0-9_.]*\\([^)]*\\)"
+  },
+  "card_pattern": "(?:^|[^A-Za-z0-9])([3456](?:[ -]?[0-9]){12,18})(?=$|[^A-Za-z0-9])",
+  "card_lengths": [
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "error": "Sensitive personal or authentication data is blocked. Use a non-sensitive sample instead.",
+  "label_probe_values": [
+    "pcrc-column-probe",
+    "234567890123",
+    "ABCDE1234F",
+    "123-45-6789"
+  ]
+}

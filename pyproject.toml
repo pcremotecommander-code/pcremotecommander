@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools==84.1.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jan-mcp-commander"
+version = "0.7.0rc1"
+description = "Secure remote computer access through AI; workspace-scoped MCP tools"
+requires-python = ">=3.11"
+dependencies = ["mcp==2.3.0", "cryptography==50.0.2", "uvicorn==0.54.0", "pypdf==6.21.4", "pypdfium2==5.14.0", "Pillow==13.0.0", "pywin32==312; sys_platform == 'win32'"]
+
+[project.optional-dependencies]
+browser = ["playwright==1.64.0", "Pillow==13.0.0"]
+desktop = ["PyAutoGUI==0.9.54", "Pillow==13.0.0"]
+dev = ["pytest==9.1.1", "PyYAML==6.0.3", "bandit==1.9.4", "pip-audit==2.10.1"]
+
+[project.scripts]
+jan-mcp-control = "jan_mcp_commander.control:main"
+jan-mcp-http = "jan_mcp_commander.http_server:main"
+jan-mcp-cloudflare = "jan_mcp_commander.cloudflare:main"
+jan-mcp = "jan_mcp_commander.cli:main"
+jan-mcp-remote = "jan_mcp_commander.remote:main"
+jan-mcp-commander = "jan_mcp_commander.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jan_mcp_commander = ["vendor/*", "media-manifest.json", "privacy-rules.json", "skill_data/jan-commander/SKILL.md", "skill_data/pcrc-computer-use/SKILL.md", "skill_data/jan-commander/agents/*.yaml", "skill_data/jan-commander/references/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

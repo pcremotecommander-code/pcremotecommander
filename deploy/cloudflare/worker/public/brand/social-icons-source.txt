@@ -1,0 +1,5 @@
+Social brand silhouettes: GitHub, X, Instagram, Discord.
+SVG paths from Simple Icons (CC0): https://github.com/simple-icons/simple-icons
+Downloaded November 7, 2026. Brand names and marks belong to their respective owners.
+Source files: https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/{github,x,instagram,discord}.svg
+Only the path geometry is used; icons inherit the footer foreground color.

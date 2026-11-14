@@ -1,0 +1,41 @@
+name: jan-commander
+services:
+  jan:
+    image: jan-mcp-commander:0.5.0
+    build:
+      context: ../..
+      dockerfile: deploy/cloud/Dockerfile
+    user: '10001:10001'
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      JAN_TUNNEL_ID: ${JAN_TUNNEL_ID:?Set JAN_TUNNEL_ID in deploy/cloud/.env}
+      JAN_MCP_ALLOW_WRITES: '0'
+    volumes:
+      - type: bind
+        source: ${JAN_WORKSPACE_PATH:?Set absolute JAN_WORKSPACE_PATH in deploy/cloud/.env}
+        target: /workspace
+        read_only: true
+        bind:
+          create_host_path: false
+      - jan-state:/state
+    secrets: [tunnel_api_key]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+secrets:
+  tunnel_api_key:
+    file: ./secrets/tunnel_api_key
+volumes:
+  jan-state:

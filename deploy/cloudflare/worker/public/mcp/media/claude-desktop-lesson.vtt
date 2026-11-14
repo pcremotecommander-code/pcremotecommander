@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.000
+In Customize, open Connectors, then Add and Add custom connector.
+
+00:00:04.000 --> 00:00:09.000
+Name it PC Remote Commander, paste the PCRC server URL, then choose Continue.
+
+00:00:09.000 --> 00:00:14.000
+Choose Sign in now and Claude’s published identity when offered.
+
+00:00:14.000 --> 00:00:18.000
+Finish adding the connector. If it shows as disconnected, click Connect.
+
+00:00:18.000 --> 00:00:23.000
+Review the PCRC account and requested permissions. Select Allow access if they match.
+
+00:00:23.000 --> 00:00:27.500
+Back in Claude, enable PCRC under + and Connectors. Ask for a read-only workspace check.
+
+00:00:27.500 --> 00:00:32.500
+For local use on the same PC, configure Claude Desktop to launch the installed PCRC stdio command.
+
+00:00:32.500 --> 00:00:37.500
+Check the runtime and workspace paths, then restart Claude Desktop and try listing your workspace.

@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Start PCRC on Windows, compare the pairing codes, and keep the selected computer online.
+
+00:00:05.000 --> 00:00:10.000
+Open Customize > Connectors, choose Add > Add custom connector, and enter the PCRC server URL.
+
+00:00:10.000 --> 00:00:15.000
+Choose OAuth and Sign in now. Sign in to the account that owns the computer.
+
+00:00:15.000 --> 00:00:20.000
++ > Connectors > PC Remote Commander. Try a read-only request and check the result.

@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {Client} from '@modelcontextprotocol/client';
+import {StdioClientTransport} from '@modelcontextprotocol/client/stdio';
+const runtime=resolve(process.argv[2] || 'work/beta16-qa-clean-profile/PCRemoteCommander/preview/0.7.0-beta.16');
+const temporary=await mkdtemp(join(tmpdir(),'pcrc-beta12-packed-'));
+const workspace=join(temporary,'workspace');await mkdir(join(workspace,'nested'),{recursive:true});await writeFile(join(workspace,'nested','marker.txt'),'before');
+const client=new Client({name:'packed-acceptance',version:'1'});
+await client.connect(new StdioClientTransport({command:process.execPath,args:[join(runtime,'deploy/mcp-task-server/dist/main.js')],env:{...process.env,JAN_MCP_WORKSPACE:workspace,JAN_MCP_STATE_DIR:join(temporary,'private'),JAN_MCP_PYTHON:join(runtime,'.venv/Scripts/python.exe'),JAN_MCP_CONTROL:'1',JAN_MCP_CAPABILITIES:'files'},stderr:'pipe'}));
+try{
+ const call=(name,args={})=>client.callTool({name,arguments:args});
+ const status=await call('get_connection_status');assert.equal(status.isError,undefined);assert.ok(status.structuredContent.data.computer_name);assert.equal(status.structuredContent.data.connection_details.backend_transport,'stdio');
+ for(const path of ['nested','nested/','nested\\'])assert.equal((await call('list_workspace_entries',{path})).isError,undefined);
+ const missing=await call('inspect_file',{path:'missing.txt'});assert.equal(missing.structuredContent.error_code,'FILE_NOT_FOUND');assert.equal(missing.structuredContent.data.error_code,'FILE_NOT_FOUND');
+ assert.equal((await call('create_text_file',{path:'missing/new.txt',content:'test'})).structuredContent.data.error_code,'PARENT_DIRECTORY_NOT_FOUND');
+ const hash=(await call('inspect_file',{path:'nested/marker.txt'})).structuredContent.data.sha256;
+ const args={path:'nested/marker.txt',old_text:'before',new_text:'after',expected_sha256:hash};
+ assert.equal((await call('preview_file_edit',args)).isError,undefined);
+ const applied=await call('apply_file_edit',{...args,confirmed:true});assert.equal(applied.isError,undefined);
+ assert.equal((await call('apply_file_edit',{...args,confirmed:true})).structuredContent.data.error_code,'HASH_MISMATCH');
+ assert.equal((await call('restore_file_backup',{backup_id:applied.structuredContent.data.backup_id,confirmed:true})).isError,undefined);
+ assert.equal((await call('read_file_excerpt',{path:'nested/marker.txt'})).structuredContent.data.content,'before');
+ const task=(await call('create_task',{title:'Packed shared-task check',confirmed:true})).structuredContent.data;
+ const lease=(await call('claim_task',{task_id:task.id,agent:'packed-test',resources:['file:reserved.txt'],confirmed:true})).structuredContent.data;
+ const assignment={task_id:lease.id,lease_token:lease.lease_token};
+ assert.equal((await call('create_text_file',{path:'reserved.txt',content:'safe',confirmed:true,...assignment})).isError,undefined);
+ assert.equal((await call('create_text_file',{path:'reserved.txt',content:'blocked',confirmed:true})).structuredContent.error_code,'TASK_CONFLICT');
+ assert.equal((await call('finish_task',{...assignment,status:'completed',confirmed:true})).isError,undefined);
+ assert.ok((await client.listResources()).resources.length);assert.ok((await client.listResourceTemplates()).resourceTemplates.length);
+ assert.ok((await client.getPrompt({name:'troubleshoot_connection',arguments:{goal:'Check connection'}})).messages.length);
+ console.log('PASS: packed runtime/embedded Python: shared-task claims, guarded writes/conflicts, handoff, directory/errors/edit/recovery, identity and resources/prompts. No user workspace or desktop actions.');
+}finally{await client.close();}
