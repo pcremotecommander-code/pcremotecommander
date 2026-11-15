@@ -1,4 +1,5 @@
 import copy
+import sys
 import time
 import pytest
 from jan_mcp_commander.control import ControlCommander
@@ -138,6 +139,7 @@ def test_worker_permission_heartbeat_does_not_charge_tool_rate_quota(uia,monkeyp
     with pytest.raises(PermissionDenied):c._require_capability('desktop')
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows screenshot/UIA cross-method contract')
 def test_screenshot_invalidates_uia_and_requires_its_own_one_use_frame(uia,monkeypatch):
     import sys
     from types import SimpleNamespace
@@ -156,6 +158,7 @@ def test_screenshot_invalidates_uia_and_requires_its_own_one_use_frame(uia,monke
 
 
 @pytest.mark.parametrize('acting',[False,True])
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows UIA subprocess deadline contract')
 def test_worker_deadline_kills_once_without_input_replay(monkeypatch,acting):
     import subprocess
     from types import SimpleNamespace

@@ -3,12 +3,15 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import os
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from build_npm_beta import build  # noqa: E402
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows runtime packager uses npm.cmd and Windows wheel layout')
 def test_beta_package_contains_task_server_and_runtime_dependencies(tmp_path,monkeypatch):
     from zipfile import ZipFile
     import build_npm_beta

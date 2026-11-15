@@ -52,7 +52,19 @@ jobs:
           npm ci --prefix deploy/cloudflare/worker
           npm ci --prefix deploy/mcp-task-server
           npm ci --prefix deploy/npm/jan-commander
+      - name: Install synthetic-browser prerequisite
+        run: python -m playwright install --with-deps chromium
+      - name: Warm and verify Windows security prerequisite
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Write-Output PCRC_CI_POWERSHELL_READY
+          Get-MpComputerStatus | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge | ConvertTo-Json -Compress
+          python -c "from jan_mcp_commander.security_scan import scan_bytes; print(scan_bytes(b'PCRC CI synthetic fixture')['result'])"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Python tests
+        env:
+          JAN_MCP_BROWSER_CHANNEL: chromium
         run: python -m pytest -q -ra
       - name: Gateway types and tests (includes dry-run build)
         env:
@@ -62,16 +74,14 @@ jobs:
           npm test --prefix deploy/cloudflare/worker
       - name: Launcher tests
         run: node --test deploy/npm/launcher/tests/*.test.cjs
-      - name: Install synthetic-browser prerequisite
-        run: python -m playwright install --with-deps chromium
       - name: Build MCP test client
         run: npm run build --prefix deploy/mcp-task-server
-      - name: MCP integration tests (Linux virtual display)
+      - name: MCP bridge and catalog unit tests (Linux)
         if: runner.os == 'Linux'
         env:
           JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
           JAN_MCP_BROWSER_CHANNEL: chromium
-        run: xvfb-run -a node --test --test-concurrency=1 'deploy/mcp-task-server/dist/**/*.test.js'
+        run: node --test deploy/mcp-task-server/dist/bridge.test.js deploy/mcp-task-server/dist/catalog.test.js
       - name: MCP integration tests (Windows)
         if: runner.os == 'Windows'
         env:

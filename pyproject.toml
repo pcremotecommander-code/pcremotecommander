@@ -12,7 +12,7 @@ dependencies = ["mcp==2.3.0", "cryptography==50.0.2", "uvicorn==0.54.0", "pypdf=
 [project.optional-dependencies]
 browser = ["playwright==1.64.0", "Pillow==13.0.0"]
 desktop = ["PyAutoGUI==0.9.54", "Pillow==13.0.0"]
-dev = ["pytest==9.1.1", "PyYAML==6.0.3", "bandit==1.9.4", "pip-audit==2.10.1"]
+dev = ["pytest==9.1.1", "PyYAML==6.0.3", "bandit==1.9.4", "pip-audit==2.10.1", "av==19.0.2", "numpy==2.5.4"]
 
 [project.scripts]
 jan-mcp-control = "jan_mcp_commander.control:main"

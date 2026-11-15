@@ -37,6 +37,7 @@ def test_older_parent_recovers_system_drive_from_windows_directory(monkeypatch):
     assert {k.upper():v for k,v in runtime_environment().items()}['SYSTEMDRIVE']=='D:'
 
 
+@pytest.mark.skipif(security_scan.os.name != 'nt', reason='Windows scanner deadline contract')
 def test_scan_uses_one_shared_deadline_instead_of_stacking_timeouts(monkeypatch):
     import jan_mcp_commander.worker_limits as limits
     clock=[0];timeouts=[]

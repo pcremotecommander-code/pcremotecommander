@@ -1,6 +1,6 @@
 # Source verification
 
-The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch. Linux and Windows runners install the pinned project dependencies, scan Git-visible source for private-state paths and common credential formats, run Python tests, check gateway types and tests, test the public launcher, and run MCP integration tests against synthetic fixtures. Linux browser tests use a virtual display; both platforms use Playwright Chromium.
+The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch. Linux and Windows runners install the pinned project dependencies, scan Git-visible source for private-state paths and common credential formats, run Python tests, check gateway types and tests, and test the public launcher. Python browser fixtures use headless Playwright Chromium. Windows additionally runs the full MCP integration suite against synthetic fixtures; Linux runs MCP bridge and catalog unit tests because the media/document release preflight requires Windows AMSI/Defender. Windows-specific packager, scanner and UIA tests are explicitly skipped on other systems, not counted as passes.
 
 The workflow has read-only repository permission, checks out without persisted credentials, and pins official GitHub actions to full commit IDs. It contains no production secrets, deployment, npm publication, email delivery or financial actions. It does not change branch protection or promote `next` to `main`.
 

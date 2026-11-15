@@ -1,4 +1,5 @@
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import pytest
@@ -25,7 +26,8 @@ def demo(tmp_path, monkeypatch):
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
     monkeypatch.setenv('JAN_MCP_STATE_DIR', str(tmp_path / 'private'))
-    pc = ControlCommander(workspace, enabled={'files', 'browser'}, headless=True, browser_channel='msedge')
+    pc = ControlCommander(workspace, enabled={'files', 'browser'}, headless=True,
+                          browser_channel=os.environ.get('JAN_MCP_BROWSER_CHANNEL', 'msedge' if os.name == 'nt' else 'chromium'))
     pc.browser_action('open', f'http://127.0.0.1:{http.server_port}/')
     store = coordinator(pc)
     task = store.task('create', title='Synthetic teaching')

@@ -313,6 +313,7 @@ def test_create_directory_respects_workspace_and_existing_paths(control):
     assert not (control.workspace.parent / 'outside').exists()
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='PDF release preflight requires Windows AMSI/Defender')
 def test_create_pdf_is_searchable_exclusive_and_workspace_confined(control):
     import io
     from pypdf import PdfReader
