@@ -33,7 +33,7 @@ Implementation: src/jan_mcp_commander/windows_input.py and control.py; regressio
 
 ## Publication
 
-Public Worker deployment completed: 4efb7b52-fa40-467d-9843-8a3e417cc182. Both versioned R2 artifacts uploaded. All nine public downloads were fetched and matched their local SHA-256 checksums (work/beta44-public-downloads.json). npm publication still requires the owner's private npm authentication. No claim that npm beta points to beta.44 is made yet.
+Public Worker deployment completed: 4efb7b52-fa40-467d-9843-8a3e417cc182. Both versioned R2 artifacts uploaded. All nine public downloads were fetched and matched their local SHA-256 checksums (work/beta44-public-downloads.json). The owner completed npm publication. Independent registry verification confirms beta points to 0.7.0-beta.44; SHA-512 and SHA-1 integrity match and all five published package files match the tested owner release (work/beta44-npm-verification.json). The normal daily command npx --yes pcremotecommander@beta setup now resolves this version.
 
 ## Boundaries
 
