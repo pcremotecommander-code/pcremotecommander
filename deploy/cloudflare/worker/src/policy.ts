@@ -18,6 +18,7 @@ export interface Settings {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   ALLOWED_GITHUB_ID: string;
+  PCRC_OWNER_GITHUB_ID?: string;
   JAN_AUTO_ORIGIN?: string;
   JAN_RELAY_ENABLED?: string;
   JAN_PAIRING_ENABLED?: string;
@@ -34,6 +35,7 @@ export interface Settings {
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
   PCRC_EMAIL_AUTH_ENABLED?: string;
+  PCRC_PUBLIC_SITE_ORIGIN?: string;
   OAUTH_KV?: KVNamespace;
   DEVICES?: DurableObjectNamespace;
   BILLING_SERVICE?: Fetcher;
@@ -96,6 +98,7 @@ export function config(env: Settings) {
   if (!plain(origin) || !/^[a-z0-9-]+\.trycloudflare\.com$/.test(origin.hostname)) throw new Error('Invalid tunnel origin');
   if (!/^[A-Za-z0-9_-]{43,128}$/.test(env.JAN_PROXY_KEY)) throw new Error('Invalid private proxy credential');
   if (!permittedAccount(env.ALLOWED_GITHUB_ID,env.ALLOWED_GITHUB_ID) || !/^[A-Za-z0-9_]{8,64}$/.test(env.GITHUB_CLIENT_ID) || (typeof env.GITHUB_CLIENT_SECRET!=='string' || env.GITHUB_CLIENT_SECRET.length<16 || env.GITHUB_CLIENT_SECRET.length>256) || ![undefined,'0','1'].includes(env.JAN_MULTI_USER_ENABLED) || ![undefined,'public','owner'].includes(env.JAN_SITE_ROLE) || env.JAN_BETA_GITHUB_IDS!==undefined&&(env.JAN_MULTI_USER_ENABLED!=='1'||!validBetaIds(env.JAN_BETA_GITHUB_IDS,env.ALLOWED_GITHUB_ID))) throw new Error('Owner authentication not configured');
+  if(env.PCRC_OWNER_GITHUB_ID!==undefined&&authenticatedGitHubId(env.PCRC_OWNER_GITHUB_ID,env.PCRC_OWNER_GITHUB_ID)!==env.PCRC_OWNER_GITHUB_ID)throw new Error('Invalid owner GitHub identity');
   return {publicOrigin:publicUrl.origin,origin:origin.origin,resource:publicUrl.origin+'/mcp'};
 }
 const ORIGIN_RECORD='jan:active-origin:v1';

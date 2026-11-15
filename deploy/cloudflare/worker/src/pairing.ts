@@ -48,10 +48,12 @@ export async function pairingStore(path:string,body:Entry,storage:DurableObjectS
     const pairs=await tx.get<Record<string,Pair>>('pairing:v1')??{};
     for(const [id,pair] of Object.entries(pairs)) if(pair.expires+PAIR_TTL<=now) delete pairs[id];
     const save=()=>tx.put('pairing:v1',pairs);
+    const planPro=async(id:string|null)=>{if(!id)return false;const plan=await tx.get<{pro:boolean;validUntil?:number|null}>('pairing:pro:v1:'+id);return !!plan?.pro&&(plan.validUntil==null||plan.validUntil>now);};
     const updatePlan=async(ownerId:string)=>{
-      if(typeof body.pro!=='boolean'||!Number.isSafeInteger(body.revision)||Number(body.revision)<0)return false;
-      const key='pairing:pro:v1:'+ownerId,previous=await tx.get<{pro:boolean;revision:number}>(key);
-      if(!previous||previous.revision<=Number(body.revision))await tx.put(key,{pro:body.pro,revision:body.revision});
+      if(typeof body.pro!=='boolean'||!Number.isSafeInteger(body.revision)||Number(body.revision)<0||body.validUntil!==undefined&&body.validUntil!==null&&(!Number.isSafeInteger(body.validUntil)||Number(body.validUntil)<0))return false;
+      const key='pairing:pro:v1:'+ownerId,previous=await tx.get<{pro:boolean;revision:number;validUntil?:number|null}>(key);
+      if(previous&&previous.revision===Number(body.revision)&&(previous.pro!==body.pro||(previous.validUntil??null)!==(body.validUntil??null)))return false;
+      if(!previous||previous.revision<Number(body.revision))await tx.put(key,{pro:body.pro,revision:body.revision,...(body.validUntil!==undefined?{validUntil:body.validUntil}:{})});
       return true;
     };
     if(path==='/pairing/plan'){
@@ -65,7 +67,7 @@ export async function pairingStore(path:string,body:Entry,storage:DurableObjectS
       const owners=await tx.get<string[]>(bindingKey(body.publicKey))??[];
       if(!owners.length||owners[0]===ownerId)return json({allowed:true});
       if(!owners.includes(ownerId))return json({allowed:false});
-      for(const id of owners)if(!(await tx.get<{pro:boolean}>('pairing:pro:v1:'+id))?.pro)return json({allowed:false});
+      for(const id of owners)if(!await planPro(id))return json({allowed:false});
       return json({allowed:true});
     }
     if(path==='/pairing/release-check'){
@@ -120,11 +122,11 @@ export async function pairingStore(path:string,body:Entry,storage:DurableObjectS
       // Only the authenticated portal injects this immutable provider subject.
       const ownerId=authenticatedAccountId(body.ownerId);
       const owners=await tx.get<string[]>(bindingKey(p.publicKey))??[];
-      if(owners.length>1&&ownerId!==owners[0])for(const id of owners)if(!(await tx.get<{pro:boolean}>('pairing:pro:v1:'+id))?.pro)return json({error:'Shared installation requires Pro on each account'},402);
+      if(owners.length>1&&ownerId!==owners[0])for(const id of owners)if(!await planPro(id))return json({error:'Shared installation requires Pro on each account'},402);
       const foreign=p.ownerId&&ownerId!==p.ownerId||owners.length&&!owners.includes(ownerId??'');
       const checkedOwners=Array.isArray(body.shareOwners)?body.shareOwners:[];
       let shareAllowed=p.accountChoice&&body.shareAllowed===true&&owners.every(id=>checkedOwners.includes(id));
-      if(shareAllowed)for(const id of [...new Set([...owners,ownerId])])if(!(await tx.get<{pro:boolean}>('pairing:pro:v1:'+id))?.pro){shareAllowed=false;break;}
+      if(shareAllowed)for(const id of [...new Set([...owners,ownerId])])if(!await planPro(id)){shareAllowed=false;break;}
       if(!ownerId||foreign&&!shareAllowed) return json({error:'Wrong PCRC account'},403);
       if(path==='/pairing/view') return json(view(p,now,p.browserChoice||env.JAN_MULTI_USER_ENABLED!=='1'));
       if(p.expires<=now||p.status!=='pending') return json({error:'Pairing is no longer pending'},409);

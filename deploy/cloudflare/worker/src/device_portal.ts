@@ -1,3 +1,4 @@
+import {ownerConsole,memberSupport} from './owner_console.ts';
 import {emailAuth,emailAuthEnabled} from './email_auth.ts';
 import {approvalInbox} from './approval_inbox.ts';
 import type {PendingAction} from './action_access.ts';
@@ -31,13 +32,13 @@ export async function deviceStore(env:DeviceEnv,path:string,data:unknown,account
 async function pairingAccount(env:DeviceEnv,id:string,accountId:string,approving=false) {
   const context=await deviceStore(env,'/pairing/context',{id}) as {publicKey:string;owners:string[];accountChoice:boolean};
   const target=await deviceStore(env,'/device/enrollment-check',{publicKey:context.publicKey},accountId);
-  await deviceStore(env,'/pairing/plan',{ownerId:accountId,pro:target.pro,revision:target.revision});
+  await deviceStore(env,'/pairing/plan',{ownerId:accountId,pro:target.pro,revision:target.revision,validUntil:target.validUntil??null});
   let shareAllowed=false;
   if(context.accountChoice&&target.pro){
     shareAllowed=true;
     for(const other of context.owners){
       const state=await deviceStore(env,'/device/enrollment-check',{publicKey:context.publicKey},other);
-      await deviceStore(env,'/pairing/plan',{ownerId:other,pro:state.pro,revision:state.revision});
+      await deviceStore(env,'/pairing/plan',{ownerId:other,pro:state.pro,revision:state.revision,validUntil:state.validUntil??null});
       if(!state.pro){shareAllowed=false;break;}
     }
   }
@@ -73,16 +74,17 @@ async function pairingClientKey(request:Request,env:DeviceEnv):Promise<string> {
 export async function session(request:Request,env:DeviceEnv,allowClosing=false) {
   const selected=await portalCookie(request,env);
   if(!selected) return null;
-  let item:{login:string;csrf:string;userId?:string;closing?:boolean;authVersion?:number}|null;
+  let item:{login:string;csrf:string;userId?:string;closing?:boolean;authVersion?:number;ownerOrigin?:string;ownerLoginAt?:number;ownerGithubId?:string}|null;
   try {item=await deviceStore(env,'/session/get',{hash:await digest(selected.token)},selected.accountId);}
   catch(error){if(error instanceof DeviceStateError&&error.status===410)return null;throw error;}
+  if(item?.ownerOrigin&&(env.JAN_SITE_ROLE!=='owner'||item.ownerOrigin!==config(env).publicOrigin))return null;
   if(item?.closing&&!allowClosing)return null;
   return item&&(item.userId===selected.accountId||selected.accountId===env.ALLOWED_GITHUB_ID&&item.userId===undefined)?{...item,userId:selected.accountId}:null;
 }
-export async function createPortalSession(env:DeviceEnv,identity:{id:string;login:string},returnTo='/devices',expectedAuthVersion?:number):Promise<Response> {
+export async function createPortalSession(env:DeviceEnv,identity:{id:string;login:string;ownerGithubId?:string},returnTo='/devices',expectedAuthVersion?:number):Promise<Response> {
   const token=randomCode(),csrf=randomCode();
-  if(env.JAN_MULTI_USER_ENABLED==='1')await deviceStore(env,'/directory/register',{id:identity.id,login:identity.login},env.ALLOWED_GITHUB_ID);
-  await deviceStore(env,'/session/create',{hash:await digest(token),login:identity.login,csrf,userId:identity.id,...(expectedAuthVersion!==undefined?{expectedAuthVersion}:{})},identity.id);
+  if(env.JAN_MULTI_USER_ENABLED==='1'&&!(env.JAN_SITE_ROLE==='owner'&&env.PCRC_OWNER_GITHUB_ID))await deviceStore(env,'/directory/register',{id:identity.id,login:identity.login},env.ALLOWED_GITHUB_ID);
+  await deviceStore(env,'/session/create',{hash:await digest(token),login:identity.login,csrf,userId:identity.id,...(env.JAN_SITE_ROLE==='owner'?{ownerOrigin:config(env).publicOrigin,ownerLoginAt:Date.now(),ownerGithubId:identity.ownerGithubId??identity.id}:{}),...(expectedAuthVersion!==undefined?{expectedAuthVersion}:{})},identity.id);
   const initial=env.JAN_SITE_ROLE!=='owner'&&returnTo==='/devices'&&env.JAN_PAIRING_ENABLED==='1'&&!(await deviceStore(env,'/device/list',{},identity.id)).devices.some((d:{revoked:boolean})=>!d.revoked);
   const value=env.JAN_MULTI_USER_ENABLED==='1'?identity.id+'.'+token+'.'+await sessionMac(env,identity.id,token):token;
   return new Response(null,{status:302,headers:{Location:config(env).publicOrigin+(env.JAN_SITE_ROLE==='owner'?'/admin':initial?'/devices/connect':signInReturn(returnTo)??'/devices'),'Set-Cookie':'__Host-JanPortal='+value+'; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
@@ -132,6 +134,7 @@ async function beginGitHubLogin(request:Request,env:DeviceEnv,returnTo:string,li
   await deviceStore(env,'/oauth/start',{state,verifier,returnTo,...(link?{link}:{}),...(env.JAN_MULTI_USER_ENABLED==='1'?{clientKey:await pairingClientKey(request,env)}:{})});
   const target=new URL('https://github.com/login/oauth/authorize');
   target.search=new URLSearchParams({client_id:env.GITHUB_CLIENT_ID,redirect_uri:origin+'/callback',scope:'read:user',state,code_challenge:await s256(verifier),code_challenge_method:'S256'}).toString();
+  if(env.JAN_SITE_ROLE==='owner')target.searchParams.set('prompt','select_account');
   return new Response(null,{status:302,headers:{Location:target.href,'Set-Cookie':'__Host-JanPortalOAuth='+state+'; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=300','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
 }
 async function githubIdentity(code:string,verifier:string,env:DeviceEnv,fetcher:typeof fetch) {
@@ -144,7 +147,7 @@ async function githubIdentity(code:string,verifier:string,env:DeviceEnv,fetcher:
   if(!user.ok) throw Error('Provider failed');
   const identity=await user.json() as {id?:number;login?:string};
   if(!Number.isSafeInteger(identity.id)||typeof identity.login!=='string')throw Error('Provider failed');
-  if(!permittedAccount(String(identity.id),env.ALLOWED_GITHUB_ID,env.JAN_MULTI_USER_ENABLED,env.JAN_BETA_GITHUB_IDS))throw new AccountAccessDenied();
+  if(env.JAN_SITE_ROLE!=='owner'&&!permittedAccount(String(identity.id),env.ALLOWED_GITHUB_ID,env.JAN_MULTI_USER_ENABLED,env.JAN_BETA_GITHUB_IDS))throw new AccountAccessDenied();
   return {id:String(identity.id),login:identity.login.slice(0,100)};
 }
 function revokePage(data:PortalData,owner:PortalOwner,id:string|null) {
@@ -194,7 +197,7 @@ export async function portal(request:Request,env:DeviceEnv,fetcher:typeof fetch=
       if(bound!==state) return failure(403,'Sign-in browser binding denied');
       const {verifier,returnTo,link}=await deviceStore(env,'/oauth/consume',{state}) as {verifier:string;returnTo:string;link?:{accountId:string;csrf:string;authVersion:number}};
       const identity=await githubIdentity(code,verifier,env,fetcher);
-      if(env.JAN_SITE_ROLE==='owner'&&identity.id!==env.ALLOWED_GITHUB_ID)return failure(403,'Owner account required');
+      if(env.JAN_SITE_ROLE==='owner'&&identity.id!==(env.PCRC_OWNER_GITHUB_ID??env.ALLOWED_GITHUB_ID))return portalPage(pageHeading('Owner account required','This GitHub account cannot open the PCRC owner console.')+'<section class="panel center-card"><div class="panel-body"><p>GitHub signed you in as <strong>@'+escaped(identity.login)+'</strong>.</p><p>Choose the original GitHub account configured to manage PCRC. If it is not listed, use another GitHub account or browser profile.</p><a class="button primary" href="/owner/login">Choose another GitHub account</a></div></section>','Owner account required',{ownerSite:true,status:403,headers:{'Referrer-Policy':'no-referrer'}});
       if(link){
         const current=await session(request,env);
         if(!emailAuthEnabled(env)||!current||current.userId!==link.accountId||await githubSessionBinding(current.csrf)!==link.csrf||(current.authVersion??0)!==link.authVersion)return failure(403,'The PCRC session changed. Start linking GitHub again from Settings.');
@@ -202,9 +205,9 @@ export async function portal(request:Request,env:DeviceEnv,fetcher:typeof fetch=
         await deviceStore(env,'/github-link/review',{hash:await digest(token),githubId:identity.id,login:identity.login,csrf:await githubSessionBinding(current.csrf),authVersion:current.authVersion??0},current.userId);
         return portalPage(pageHeading('Connect GitHub','Review the GitHub identity before linking it to your current PCRC account.')+'<section class="panel center-card"><div class="panel-body"><h2>@'+escaped(identity.login)+'</h2><p>Connect this GitHub account to <strong>'+escaped(current.login)+'</strong>? Your computers and subscription stay on your current PCRC account. Existing separate accounts will not be merged.</p><form method="post" action="/devices/github/confirm">'+hidden('csrf',current.csrf)+hidden('token',token)+'<div class="action-row">'+button('Confirm GitHub connection','primary')+'<a class="button neutral" href="/devices/settings">Cancel</a></div></form></div></section>','Review GitHub connection',{owner:current,active:'settings',headers:{'Referrer-Policy':'same-origin','Set-Cookie':'__Host-JanPortalOAuth=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'}});
       }
-      const canonical=await resolveGitHubAccount(env,identity.id);
-      const linked=canonical!==identity.id?await deviceStore(env,'/directory/find',{query:canonical}):null;
-      const response=await createPortalSession(env,{id:canonical,login:typeof linked?.login==='string'?linked.login:identity.login},returnTo);
+      const canonical=env.JAN_SITE_ROLE==='owner'?env.ALLOWED_GITHUB_ID:await resolveGitHubAccount(env,identity.id);
+      const linked=env.JAN_SITE_ROLE!=='owner'&&canonical!==identity.id?await deviceStore(env,'/directory/find',{query:canonical}):null;
+      const response=await createPortalSession(env,{id:canonical,login:typeof linked?.login==='string'?linked.login:identity.login,...(env.JAN_SITE_ROLE==='owner'?{ownerGithubId:identity.id}:{})},returnTo);
       response.headers.append('Set-Cookie','__Host-JanPortalOAuth=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
       return response;
     }
@@ -239,6 +242,7 @@ export async function portal(request:Request,env:DeviceEnv,fetcher:typeof fetch=
         const target=permittedAccount(registration.ownerId,env.ALLOWED_GITHUB_ID,env.JAN_MULTI_USER_ENABLED,env.JAN_BETA_GITHUB_IDS);
         if(!target||data.session?.owner_id!==target)return failure(403,'Pairing denied');
         await deviceStore(env,'/device/import',registration,target);
+        if(typeof (registration as {name?:unknown}).name==='string')await deviceStore(env,'/owner-data/index-device',{id:target,name:(registration as {name:string}).name});
         if(data.selectForAi===true)await deviceStore(env,'/device/select',{id:registration.id},target);
         delete data.registration;
       }
@@ -285,6 +289,9 @@ export async function portal(request:Request,env:DeviceEnv,fetcher:typeof fetch=
       return new Response(null,{status:303,headers:{Location:settings.publicOrigin+'/devices/sign-in?'+new URLSearchParams({return:returnPage}),'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
     }
     const ownerStore=(storePath:string,data:unknown)=>deviceStore(env,storePath,data,accountId!);
+    const admin=await ownerConsole(request,env,owner,(p,d,target)=>deviceStore(env,p,d,target??env.ALLOWED_GITHUB_ID),fetcher);if(admin)return admin;
+    if(path==='/devices/support'){if(env.JAN_SITE_ROLE!=='public'||!owner||!accountId)return failure(403,'Sign in required');return memberSupport(request,env,owner,accountId,(p,d,target)=>deviceStore(env,p,d,target??env.ALLOWED_GITHUB_ID));}
+
     if(path==='/admin/accounts'){
       if(env.JAN_SITE_ROLE!=='owner')return failure(404,'Unavailable');
       if(!owner||accountId!==env.ALLOWED_GITHUB_ID)return failure(403,'Owner sign-in required');

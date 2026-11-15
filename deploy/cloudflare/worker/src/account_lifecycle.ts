@@ -34,12 +34,13 @@ export async function retainAccountData(storage:DurableObjectStorage,now=Date.no
   const cursor=await storage.get<string>('retention:cursor:v1');
   const entries=await storage.list<unknown>({limit:200,...(cursor?{startAfter:cursor}:{})});
   for(const [key,value] of entries) {
-    if((key==='github-link:pending:v1'||key.startsWith('session:')&&key!=='session:index:v1'||key.startsWith('oauth:janportal.')||key.startsWith('pair:')||key.startsWith('actions:result:')||key.startsWith('actions:result-part:'))&&
+    if((key.startsWith('owner:reset-flow:')||key.startsWith('owner:reset-flow-account:')||key.startsWith('owner:totp-pending:')||key.startsWith('owner:mfa-session:')||key.startsWith('operator:nonce:')||key.startsWith('owner:ticket:')||key.startsWith('owner:account-ticket:')||key==='github-link:pending:v1'||key.startsWith('session:')&&key!=='session:index:v1'||key.startsWith('oauth:janportal.')||key.startsWith('pair:')||key.startsWith('actions:result:')||key.startsWith('actions:result-part:'))&&
       typeof value==='object'&&value!==null&&'expires' in value&&typeof value.expires==='number'&&value.expires<=now)await storage.delete(key);
   }
   if(entries.size===200)await storage.put('retention:cursor:v1',[...entries.keys()].at(-1)!);
   else await storage.delete('retention:cursor:v1');
   await storage.transaction(async tx=>{
+    const tickets=await tx.get<{record:{expires:number}}[]>('support:tickets:v1');if(tickets)await tx.put('support:tickets:v1',tickets.filter(t=>t.record.expires>now));
     for(const key of ['session:index:v1','oauth:pending:v1']) {
       const items=await tx.get<Record<string,{expires:number}>>(key);
       if(items)await tx.put(key,Object.fromEntries(Object.entries(items).filter(([,v])=>v.expires>now)));

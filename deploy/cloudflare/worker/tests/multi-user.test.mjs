@@ -1,3 +1,4 @@
+import {prepareOwnerSession} from './helpers/owner-console-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync,randomBytes,sign} from 'node:crypto';
@@ -54,6 +55,11 @@ async function login(env,id) {
   assert.ok(csrf);
   return {cookie,csrf,id:String(id)};
 }
+async function ownerAccess(env,objects,user){
+  env.JAN_SITE_ROLE='owner';const value=user.cookie.split('=')[1],parts=value.split('.');
+  await prepareOwnerSession(objects.get(env.ALLOWED_GITHUB_ID).state.storage,env,parts.length===3?parts[1]:value,user.csrf);
+}
+
 async function signedProof(pair,privateKey,action) {
   const nonce=randomBytes(32).toString('base64url'),timestamp=Date.now();
   const signature=sign('sha256',Buffer.from(pairingProof(origin,pair.id,action,pair.challenge,nonce,timestamp)),{key:privateKey,dsaEncoding:'ieee-p1363'}).toString('base64url');
@@ -140,7 +146,7 @@ test('owner account controls stay private and release only the reviewed computer
   const keyName='pairing:key-owner:v1:'+key;
   await objects.get('1234').state.storage.put(keyName,['5678']);
   assert.equal((await portal(request('/admin/accounts?account=5678',{headers:{Cookie:operator.cookie}}),env)).status,404);
-  env.JAN_SITE_ROLE='owner';
+  await ownerAccess(env,objects,operator);
   assert.equal((await portal(request('/admin/accounts?account=5678',{headers:{Cookie:member.cookie}}),env)).status,403);
   const page=await portal(request('/admin/accounts?account=5678',{headers:{Cookie:operator.cookie}}),env);
   assert.equal(page.status,200);assert.match(await page.text(),/Release for another account/);
@@ -162,7 +168,7 @@ test('owner may revoke their own computer without being able to delete the opera
   const {env,objects}=fixture();env.JAN_SITE_ROLE='public';const operator=await login(env,1234);
   const id=crypto.randomUUID(),object=objects.get('1234');
   await object.state.storage.put('devices',{[id]:{id,name:'Operator test PC',ownerId:'1234',revoked:false,publicKey:generateKeyPairSync('ec',{namedCurve:'prime256v1'}).publicKey.export({type:'spki',format:'der'}).toString('base64url')}});
-  env.JAN_SITE_ROLE='owner';
+  await ownerAccess(env,objects,operator);
   const post=operation=>portal(request('/admin/accounts',{method:'POST',headers:{Cookie:operator.cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:operator.csrf,account:'1234',device:id,operation,confirmation:operation.toUpperCase()})}),env);
   assert.equal((await post('revoke')).status,200);assert.equal((await object.state.storage.get('devices'))[id].revoked,true);
   assert.equal((await post('delete')).status,403);assert.equal(await object.state.storage.get('account:closing:v1'),undefined);
@@ -192,9 +198,11 @@ test('revoked reconnect requires its original account; only explicit enrollment 
   assert.equal((await start({shareAllowed:true})).status,400,'native callers cannot inject server-only sharing authorization');
   const pro={synthetic:{status:'active',priceId:env.PADDLE_PRICE_ID}};
   await objects.get('5678').state.storage.put('billing:subscriptions:v1',pro);
+  await objects.get('5678').state.storage.put('billing:plan-revision:v1',1);
   const explicit=await (await start({accountChoice:true})).json();
   assert.equal((await portal(request('/devices/approve?id='+explicit.id,{headers:{Cookie:b.cookie}}),env)).status,403,'Free destination cannot share a Pro installation');
   await objects.get('9012').state.storage.put('billing:subscriptions:v1',pro);
+  await objects.get('9012').state.storage.put('billing:plan-revision:v1',1);
   assert.equal((await portal(request('/devices/approve?id='+explicit.id,{headers:{Cookie:b.cookie}}),env)).status,200);
   await json('/devices/pair/proof',await signedProof(explicit,key.privateKey,'status'));
   assert.equal((await decide(explicit,b)).status,303);
@@ -532,25 +540,20 @@ test('sign-in verifier and per-account session details are sealed at rest',async
   assert.equal(await denied.json(),null);
 });
 
-test('owner operations view shows only beta account IDs, device names and presence',async()=>{
-  const {env,objects}=fixture();env.JAN_BETA_GITHUB_IDS='1234,5678';
-  const owner=await login(env,1234),member=await login(env,5678);
-  const id='12345678-1234-1234-1234-123456789abc';
-  await objects.get('1234').state.storage.put('devices',{legacy:{id:'legacy',name:'Old tunnel PC',ownerId:'1234',created:Date.now(),revoked:false,lastSeen:Date.now()}});
+test('owner analytics uses complete snapshots and keeps individual user data in Users',async()=>{
+  const {env,objects}=fixture();
+  const owner=await login(env,1234),member=await login(env,5678),id=crypto.randomUUID();
   await objects.get('5678').state.storage.put('devices',{[id]:{id,name:'Member PC',os:'Private system description',ownerId:'5678',publicKey:'key-marker',created:Date.now(),revoked:false,lastSeen:0}});
   objects.get('5678').relay.getSession=()=>({online:true});
-  const summary=await objects.get('5678').fetch(request('/device/status-summary',{method:'POST',headers:{'X-Jan-Account-Id':'5678'},body:'{}'}));
-  assert.deepEqual(await summary.json(),{activeBrowserSessions:1,recordedToolCalls:0,plan:'free',devices:[{name:'Member PC',online:true}]});
-  const ownerPage=await portal(request('/admin',{headers:{Cookie:owner.cookie}}),env);
-  assert.equal(ownerPage.status,200);
-  const html=await ownerPage.text();
-  for(const text of ['Account 1234','Account 5678','Member PC','Old tunnel PC','Unknown','Operations','Signed-in accounts','Online computers','Recorded tool calls','Free accounts have a 15,000-call monthly allowance'])assert.ok(html.includes(text));
-  assert.match(html,/Signed-in accounts<\/div><div class="stat-value">2<\/div>/);
-  for(const secret of ['Private system description','key-marker','Use this computer','Revoke access'])assert.ok(!html.includes(secret));
+  await ownerAccess(env,objects,owner);
+  const refreshed=await portal(request('/admin/analytics/refresh',{method:'POST',headers:{Cookie:owner.cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:owner.csrf})}),env);
+  assert.equal(refreshed.status,200);assert.equal((await refreshed.json()).complete,true);
+  const snapshot=await objects.get('1234').state.storage.get('owner:analytics:v1');assert.equal(snapshot.totals.users,2);assert.equal(snapshot.totals.online,1);assert.equal(snapshot.totals.signedIn,2);
+  const html=await (await portal(request('/admin',{headers:{Cookie:owner.cookie}}),env)).text();
+  for(const label of ['Analytics','Total accounts','Signed-in accounts','Online accounts','Monthly financials'])assert.ok(html.includes(label));
+  for(const value of ['Private system description','key-marker','Member PC'])assert.ok(!html.includes(value));
   assert.equal((await portal(request('/admin',{headers:{Cookie:member.cookie}}),env)).status,403);
-  assert.equal((await portal(request('/admin'),env)).status,403);
-  assert.match(await (await portal(request('/devices',{headers:{Cookie:owner.cookie}}),env)).text(),/href="\/admin">Operations/);
-  assert.doesNotMatch(await (await portal(request('/devices',{headers:{Cookie:member.cookie}}),env)).text(),/href="\/admin">Operations/);
+  assert.equal((await portal(request('/admin'),env)).status,200);
 });
 
 test('separate site roles keep public users out of owner monitoring and owner pages out of MCP',async()=>{
@@ -560,6 +563,8 @@ test('separate site roles keep public users out of owner monitoring and owner pa
   assert.equal(siteRouteAllowed('public','/admin/subscriptions'),false);
   assert.equal(siteRouteAllowed('public','/owner/login'),false);
   assert.equal(siteRouteAllowed('public','/devices'),true);
+  const publicLogin=await portal(request('/devices/login'),env);
+  assert.equal(publicLogin.status,302);assert.equal(new URL(publicLogin.headers.get('Location')).searchParams.get('prompt'),null);
   env.JAN_SITE_ROLE='owner';
   assert.equal(siteRouteAllowed('owner','/devices'),false);
   assert.equal(siteRouteAllowed('owner','/mcp'),false);
@@ -571,6 +576,7 @@ test('separate site roles keep public users out of owner monitoring and owner pa
   assert.match(await signIn.text(),/href="\/owner\/login"/);
   const start=await portal(request('/owner/login'),env);
   assert.equal(start.status,302);
+  assert.equal(new URL(start.headers.get('Location')).searchParams.get('prompt'),'select_account');
   const state=new URL(start.headers.get('Location')).searchParams.get('state');
   const fetcher=async url=>url.includes('access_token')?Response.json({access_token:'synthetic-token'}):Response.json({id:1234,login:'operator'});
   const callback=await portal(request('/callback?state='+state+'&code=synthetic',{headers:{Cookie:cookies(start)}}),env,fetcher);
@@ -581,11 +587,16 @@ test('separate site roles keep public users out of owner monitoring and owner pa
   const memberProvider=async url=>url.includes('access_token')?Response.json({access_token:'synthetic-member-token'}):Response.json({id:5678,login:'member'});
   const memberCallback=await portal(request('/callback?state='+memberState+'&code=synthetic',{headers:{Cookie:cookies(memberStart)}}),env,memberProvider);
   assert.equal(memberCallback.status,403);
-  assert.match(await memberCallback.text(),/Owner account required/);
+  const memberHtml=await memberCallback.text();
+  assert.match(memberHtml,/Owner account required/);
+  assert.match(memberHtml,/GitHub signed you in as <strong>@member<\/strong>/);
+  assert.match(memberHtml,/Choose another GitHub account/);
+  assert.equal(memberCallback.headers.get('Content-Type'),'text/html; charset=utf-8');
+  assert.equal(memberCallback.headers.get('Referrer-Policy'),'no-referrer');
   assert.equal(memberCallback.headers.get('Set-Cookie'),null);
   const signed=await portal(request('/admin',{headers:{Cookie:cookies(callback)}}),env);
-  assert.equal(signed.status,200);
-  const page=await signed.text();
+  assert.equal(signed.status,303);assert.equal(signed.headers.get('Location'),origin+'/admin/security');
+  const page=await (await portal(request('/admin/security',{headers:{Cookie:cookies(callback)}}),env)).text();
   assert.match(page,/action="\/owner\/logout"/);
   assert.doesNotMatch(page,/href="\/devices">Devices/);
   const csrf=/name="csrf" value="([A-Za-z0-9_-]+)"/.exec(page)?.[1];
@@ -594,40 +605,25 @@ test('separate site roles keep public users out of owner monitoring and owner pa
   assert.equal(logout.headers.get('Location'),origin+'/admin');
   const otherStart=await portal(request('/owner/login'),env);
   const otherState=new URL(otherStart.headers.get('Location')).searchParams.get('state');
-  const otherFetcher=async url=>url.includes('access_token')?Response.json({access_token:'synthetic-token'}):Response.json({id:5678,login:'other-user'});
+  const otherFetcher=async url=>url.includes('access_token')?Response.json({access_token:'synthetic-token'}):Response.json({id:5678,login:'<img src=x onerror=alert(1)>'});
   const rejected=await portal(request('/callback?state='+otherState+'&code=synthetic',{headers:{Cookie:cookies(otherStart)}}),env,otherFetcher);
   assert.equal(rejected.status,403);
   assert.equal(rejected.headers.get('Set-Cookie'),null);
+  const rejectedHtml=await rejected.text();assert.match(rejectedHtml,/&#60;img src=x onerror=alert\(1\)&#62;/);assert.doesNotMatch(rejectedHtml,/<img src=x/);
 });
 
-test('public-mode account directory registers sign-ins and paginates status-only owner access',async()=>{
-  const {env,objects}=fixture();
-  const owner=await login(env,1234),member=await login(env,5678),another=await login(env,9999);
-  assert.equal((await portal(request('/devices',{headers:{Cookie:another.cookie}}),env)).status,200);
-  assert.equal((await portal(request('/admin',{headers:{Cookie:another.cookie}}),env)).status,403);
-  const memberStore=objects.get('5678');
-  await memberStore.state.storage.put('devices',{privateDevice:{id:'privateDevice',name:'Member laptop',os:'Sensitive OS detail',publicKey:'private-key-marker',ownerId:'5678',revoked:false}});
-  const first=await portal(request('/admin',{headers:{Cookie:owner.cookie}}),env);
-  assert.equal(first.status,200);
-  const html=await first.text();
-  for(const text of ['Account 1234','Account 5678','Account 9999','Member laptop','Offline'])assert.ok(html.includes(text));
-  for(const secret of ['Sensitive OS detail','private-key-marker','Use this computer','Revoke access'])assert.ok(!html.includes(secret));
+test('owner directory search and pagination expose only bounded name grids',async()=>{
+  const {env,objects}=fixture();const owner=await login(env,1234),member=await login(env,5678);
   assert.equal((await portal(request('/admin',{headers:{Cookie:member.cookie}}),env)).status,403);
-  assert.match(await (await portal(request('/devices',{headers:{Cookie:owner.cookie}}),env)).text(),/href="\/admin">Operations/);
+  await ownerAccess(env,objects,owner);
   const directory=objects.get('1234');
-  const register=id=>directory.fetch(request('/directory/register',{method:'POST',headers:{'X-Jan-Account-Id':'1234'},body:JSON.stringify({id:String(id)})}));
-  for(let id=1000;id<1026;id++)assert.equal((await register(id)).status,200);
-  assert.equal((await register('01000')).status,403);
-  const page=await portal(request('/admin',{headers:{Cookie:owner.cookie}}),env);
-  assert.equal(page.status,200);
-  const pageHtml=await page.text();
-  const cursor=/href="\/admin\?after=([0-9]+)"/.exec(pageHtml)?.[1];
-  assert.ok(cursor);
-  assert.equal((pageHtml.match(/<h2>Account /g)??[]).length,25);
-  const next=await portal(request('/admin?after='+cursor,{headers:{Cookie:owner.cookie}}),env);
-  assert.equal(next.status,200);
-  assert.match(await next.text(),/Account 5678/);
-  assert.equal((await portal(request('/admin?after=0001',{headers:{Cookie:owner.cookie}}),env)).status,404);
+  for(let id=1000;id<1026;id++)assert.equal((await directory.fetch(request('/directory/register',{method:'POST',headers:{'X-Jan-Account-Id':'1234'},body:JSON.stringify({id:String(id)})}))).status,200);
+  const page=await portal(request('/admin/users',{headers:{Cookie:owner.cookie}}),env);assert.equal(page.status,200);
+  const html=await page.text();assert.equal((html.match(/<a[^>]+data-open-user/g)??[]).length,20);
+  const href=/href="([^"]+)">More users/.exec(html)[1].replaceAll('&amp;','&');
+  assert.equal((await portal(request(href,{headers:{Cookie:owner.cookie}}),env)).status,200);
+  const search=await portal(request('/admin/users?q=user-5678',{headers:{Cookie:owner.cookie}}),env);const text=await search.text();assert.match(text,/Search results/);assert.match(text,/user-5678/);assert.doesNotMatch(text,/Latest users/);
+  assert.equal((await portal(request('/admin?after=0001',{headers:{Cookie:owner.cookie}}),env)).status,400);
 });
 
 test('two users have isolated sessions, pairing, devices and MCP routing',async()=>{

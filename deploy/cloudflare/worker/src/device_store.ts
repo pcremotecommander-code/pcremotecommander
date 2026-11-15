@@ -1,3 +1,5 @@
+import {ownerSecurityStore} from './owner_security.ts';
+import {ownerDataStore,indexMember,removeMemberIndex,supportStore,validOperator,type MemberMeta} from './owner_data.ts';
 import {connectedCapacity,expireConnectedCapacity} from './connected_capacity.ts';
 import {signInReturn} from './portal_return.ts';
 import {websitePromptStore} from './website_prompts.ts';
@@ -76,9 +78,21 @@ export class JanDeviceStore {
   async alarm():Promise<void> {await expirePublicBudget(this.state.storage);await expireConnectedCapacity(this.state.storage);}
   private state:DurableObjectState;
   private relay:JanRelayUpgrade;
-  private env:{ALLOWED_GITHUB_ID:string;JAN_PROXY_KEY:string;JAN_PUBLIC_ORIGIN?:string;JAN_PAIRING_ENABLED?:string;JAN_MULTI_USER_ENABLED?:string;JAN_BETA_GITHUB_IDS?:string;PADDLE_PRICE_ID?:string;DEVICES?:DurableObjectNamespace};
-  constructor(state:DurableObjectState,env:{ALLOWED_GITHUB_ID:string;JAN_PROXY_KEY:string;JAN_PUBLIC_ORIGIN?:string;JAN_PAIRING_ENABLED?:string;JAN_MULTI_USER_ENABLED?:string;JAN_BETA_GITHUB_IDS?:string;PADDLE_PRICE_ID?:string;DEVICES?:DurableObjectNamespace}) {this.state=state;this.env=env;this.relay=new JanRelayUpgrade(env);}
-  private async planState(){return this.state.storage.transaction(async tx=>({pro:isPro(await tx.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID),revision:await tx.get<number>('billing:plan-revision:v1')??0}));}
+  private env:{ALLOWED_GITHUB_ID:string;PCRC_OWNER_GITHUB_ID?:string;JAN_PROXY_KEY:string;JAN_PUBLIC_ORIGIN?:string;JAN_PAIRING_ENABLED?:string;JAN_MULTI_USER_ENABLED?:string;JAN_BETA_GITHUB_IDS?:string;PADDLE_PRICE_ID?:string;DEVICES?:DurableObjectNamespace};
+  constructor(state:DurableObjectState,env:{ALLOWED_GITHUB_ID:string;PCRC_OWNER_GITHUB_ID?:string;JAN_PROXY_KEY:string;JAN_PUBLIC_ORIGIN?:string;JAN_PAIRING_ENABLED?:string;JAN_MULTI_USER_ENABLED?:string;JAN_BETA_GITHUB_IDS?:string;PADDLE_PRICE_ID?:string;DEVICES?:DurableObjectNamespace}) {this.state=state;this.env=env;this.relay=new JanRelayUpgrade(env);}
+  private async effectivePro(storage:DurableObjectStorage|DurableObjectTransaction=this.state.storage,inTransaction=false):Promise<boolean>{
+    if(!inTransaction)return (storage as DurableObjectStorage).transaction(tx=>this.effectivePro(tx,true));
+    const grant=await storage.get<{until:number}>('billing:complimentary:v1'),paid=isPro(await storage.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID);
+    if(grant&&grant.until<=Date.now()){await storage.delete('billing:complimentary:v1');await storage.put('billing:plan-revision:v1',(await storage.get<number>('billing:plan-revision:v1')??0)+1);if(!paid)await this.enforceFreeDevices(storage);}
+    return !!grant&&grant.until>Date.now()||paid;
+  }
+  private async enforceFreeDevices(storage:DurableObjectStorage|DurableObjectTransaction){
+    const devices=await storage.get<Record<string,Entry>>('devices')??{},active=await storage.get<string>('active');
+    const enabled=Object.values(devices).filter(d=>!d.revoked).sort((a,b)=>Number(b.id===active)-Number(a.id===active)||Number(a.created??0)-Number(b.created??0)||String(a.id).localeCompare(String(b.id)));
+    for(const device of enabled.slice(1)){device.revoked=true;device.revokedAt=Date.now();this.relay.disconnect(String(device.id));}
+    await storage.put('devices',devices);
+  }
+  private async planState(){return this.state.storage.transaction(async tx=>{const pro=await this.effectivePro(tx,true),paid=isPro(await tx.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID),grant=await tx.get<{until:number}>('billing:complimentary:v1');return {pro,revision:await tx.get<number>('billing:plan-revision:v1')??0,validUntil:pro&&!paid?grant?.until??null:null};});}
   private async syncPlan(accountId:string):Promise<boolean>{
     if(this.env.JAN_MULTI_USER_ENABLED!=='1'||!this.env.DEVICES)return true;
     const state=await this.planState(),hub=this.env.DEVICES.get(this.env.DEVICES.idFromName(this.env.ALLOWED_GITHUB_ID));
@@ -87,7 +101,7 @@ export class JanDeviceStore {
   }
   private async installationAccess(accountId:string,device:Entry,devices:Record<string,Entry>):Promise<boolean>{
     if(this.env.JAN_MULTI_USER_ENABLED!=='1')return true;
-    const {pro,revision}=await this.planState();
+    const {pro,revision,validUntil}=await this.planState();
     if(!pro){
       const active=await this.state.storage.get<string>('active');
       const candidates=Object.values(devices).filter(d=>!d.revoked).sort((a,b)=>Number(b.id===active)-Number(a.id===active)||Number(a.created??0)-Number(b.created??0)||String(a.id).localeCompare(String(b.id)));
@@ -95,7 +109,7 @@ export class JanDeviceStore {
     }
     if(!this.env.DEVICES||typeof device.publicKey!=='string')return true;
     const hub=this.env.DEVICES.get(this.env.DEVICES.idFromName(this.env.ALLOWED_GITHUB_ID));
-    const response=await hub.fetch('https://internal.invalid/pairing/access',{method:'POST',headers:{'X-Jan-Account-Id':this.env.ALLOWED_GITHUB_ID,'Content-Type':'application/json'},body:JSON.stringify({ownerId:accountId,publicKey:device.publicKey,pro,revision})});
+    const response=await hub.fetch('https://internal.invalid/pairing/access',{method:'POST',headers:{'X-Jan-Account-Id':this.env.ALLOWED_GITHUB_ID,'Content-Type':'application/json'},body:JSON.stringify({ownerId:accountId,publicKey:device.publicKey,pro,revision,validUntil})});
     return response.ok&&(await response.json() as {allowed?:boolean}).allowed===true;
   }
   async fetch(request:Request):Promise<Response> {
@@ -226,14 +240,34 @@ export class JanDeviceStore {
       } catch {}
       return response;
     }
-    let body:Entry;
+    let body:Entry,rawBody='';
     try {
-      const raw=await request.text();
-      if(raw.length>4096) return json({error:'Too large'},413);
+      const raw=rawBody=await request.text();
+      if(raw.length>(path.startsWith('/owner-data/')||path.startsWith('/support/')||path.startsWith('/operator/')?32768:4096)) return json({error:'Too large'},413);
       body=JSON.parse(raw);
       if(!body || Array.isArray(body) || typeof body!=='object') throw Error();
     } catch {return json({error:'Invalid request'},400);}
     const now=Date.now(), storage=this.state.storage;
+    const security=await ownerSecurityStore(path,body,storage,this.env,accountId);if(security)return security;
+    const ownerData=await ownerDataStore(path,body,storage,this.env,accountId);if(ownerData)return ownerData;
+    if(path.startsWith('/support/'))return (await supportStore(path,{...body,operator:false},storage,this.env,accountId))!;
+    if(path.startsWith('/operator/')){
+      if(!await validOperator(request,this.env,accountId,rawBody))return json({error:'Operator proof required'},403);
+      if(path==='/operator/detail')return json({grant:await storage.get('billing:complimentary:v1')??null});
+      if(path==='/operator/support/list'||path==='/operator/support/get'||path==='/operator/support/reply')return (await supportStore(path.replace('/operator',''),{...body,operator:true},storage,this.env,accountId))!;
+      if(path!=='/operator/pro')return json({error:'Unknown operator action'},404);
+      if(typeof body.nonce!=='string'||!/^[a-f0-9-]{36}$/.test(body.nonce)||typeof body.until!=='number'||body.until!==0&&(body.until<=now||body.until>now+366*86400000)||typeof body.reason!=='string'||body.reason.length>120)return json({error:'Invalid Pro grant'},400);
+      const changed=await storage.transaction(async tx=>{
+        if(await tx.get('operator:nonce:'+body.nonce))return json({error:'Action already applied; inspect current account'},409);
+        await tx.put('operator:nonce:'+body.nonce,{at:now,expires:now+300000});
+        if(body.until===0)await tx.delete('billing:complimentary:v1');else await tx.put('billing:complimentary:v1',{until:body.until,reason:body.reason,grantedAt:now});
+        if(!await this.effectivePro(tx,true))await this.enforceFreeDevices(tx);
+        await tx.put('billing:plan-revision:v1',(await tx.get<number>('billing:plan-revision:v1')??0)+1);return json({ok:true});
+      });
+      if(changed.ok&&!await this.syncPlan(accountId))return json({error:'Grant saved; pairing synchronization unavailable. Inspect the account before another action.'},503);
+      return changed;
+    }
+
     if(path==='/account/delete-start') {
       if(accountId===this.env.ALLOWED_GITHUB_ID)return json({error:'Operator account cannot be deleted here'},403);
       const result=await beginDeletion(storage,body.confirmation);
@@ -244,7 +278,7 @@ export class JanDeviceStore {
       if(accountId===this.env.ALLOWED_GITHUB_ID)return json({error:'Operator account cannot be deleted here'},403);
       return finishDeletion(storage);
     }
-    if(path==='/account/retention'){await retainAccountData(storage);return json({ok:true});}
+    if(path==='/account/retention'){await retainAccountData(storage);if(!lifecycle.deleted&&!lifecycle.closing&&!await this.syncPlan(accountId))return json({error:'Plan synchronization unavailable'},503);return json({ok:true});}
     if(path.startsWith('/website-prompts/'))return websitePromptStore(storage,path,body,accountId,this.env.ALLOWED_GITHUB_ID);
     if(path==='/billing/subscription') {
       if(typeof body.id!=='string'||!/^sub_[a-z0-9]{26}$/.test(body.id)||typeof body.eventId!=='string'||!/^evt_[a-z0-9]{26}$/.test(body.eventId)||
@@ -256,11 +290,8 @@ export class JanDeviceStore {
         subscriptions[body.id as string]={id:body.id as string,eventId:body.eventId as string,occurredAt:body.occurredAt as number,status:body.status as string,priceId:body.priceId as string,cancelAt:typeof body.cancelAt==='string'?body.cancelAt:null};
         await tx.put('billing:subscriptions:v1',subscriptions);
         await tx.put('billing:plan-revision:v1',(await tx.get<number>('billing:plan-revision:v1')??0)+1);
-        if(!isPro(subscriptions,this.env.PADDLE_PRICE_ID)){
-          const devices=await tx.get<Record<string,Entry>>('devices')??{},active=await tx.get<string>('active');
-          const enabled=Object.values(devices).filter(d=>!d.revoked).sort((a,b)=>Number(b.id===active)-Number(a.id===active)||Number(a.created??0)-Number(b.created??0)||String(a.id).localeCompare(String(b.id)));
-          for(const device of enabled.slice(1)){device.revoked=true;device.revokedAt=now;this.relay.disconnect(String(device.id));}
-          await tx.put('devices',devices);
+        if(!await this.effectivePro(tx,true)){
+          await this.enforceFreeDevices(tx);
         }
         return json({ok:true});
       });
@@ -459,13 +490,17 @@ export class JanDeviceStore {
           const login=body.login;
           await storage.transaction(async tx=>{
             const old=await tx.get<string>(prefix+id);
+            const meta=await tx.get<MemberMeta>('owner:member:'+id)??{created:old===undefined?now:null,lastLogin:null,logins:[]};
+            meta.lastLogin=now;meta.logins=[...meta.logins,now].slice(-10);await tx.put('owner:member:'+id,meta);
+            await indexMember(tx,id,login,meta.created);
+
             if(typeof old==='string'&&old.toLowerCase()!==login.toLowerCase())await removeDirectoryAlias(tx,'directory:login:'+old.toLowerCase(),id);
             const key='directory:login:'+login.toLowerCase(),ids=[...new Set([...aliasIds(await tx.get<DirectoryAlias>(key)),id])];
             await tx.put(prefix+id,login);
             // Display names are not identities: a collision must never select a different account.
             await tx.put(key,ids.length===1?id:{ids});
           });
-        } else await storage.put(prefix+id,true);
+        } else await storage.transaction(async tx=>{const old=await tx.get<string|boolean>(prefix+id),meta=await tx.get<MemberMeta>('owner:member:'+id)??{created:old===undefined?now:null,lastLogin:null,logins:[]};await tx.put(prefix+id,old??true);await tx.put('owner:member:'+id,meta);await indexMember(tx,id,old??true,meta.created);});
         return json({ok:true});
       }
       if(path==='/directory/remove') {
@@ -473,6 +508,7 @@ export class JanDeviceStore {
         if(!id||id===accountId)return json({error:'Account denied'},403);
         await storage.transaction(async tx=>{
           await tx.put('directory:deleted:'+id,{at:now});
+          await removeMemberIndex(tx,id);
           const github=await tx.get<{id:string}>('github-link:v1:'+id);
           if(github){await tx.put('github-closed:v1:'+github.id,{at:now});await tx.delete('github-identity:v1:'+github.id);await tx.delete('github-link:v1:'+id);}
           if(!id.startsWith('s-'))await tx.delete('github-identity:v1:'+id);
@@ -500,7 +536,7 @@ export class JanDeviceStore {
       if(path==='/directory/list') {
         const after=body.after===undefined?null:authenticatedAccountId(body.after);
         if(body.after!==undefined&&!after)return json({error:'Invalid cursor'},400);
-        await storage.put(prefix+accountId,true);
+        if(await storage.get(prefix+accountId)===undefined)await storage.put(prefix+accountId,true);
         const items=await storage.list({prefix,limit:26,...(after?{startAfter:prefix+after}:{})});
         const ids=[...items.keys()].map(key=>key.slice(prefix.length));
         return json({ids:ids.slice(0,25),next:ids.length>25?ids[24]:null});
@@ -679,7 +715,7 @@ export class JanDeviceStore {
       if(await storage.get('account:password-reset:v1')||body.expectedAuthVersion!==undefined&&body.expectedAuthVersion!==version)return json({error:'Sign-in changed; retry'},409);
       if(typeof body.hash!=='string'||! /^[a-f0-9]{64}$/.test(body.hash)||typeof body.login!=='string'||body.login.length>100||typeof body.csrf!=='string') return json({error:'Invalid session'},400);
       if(body.userId!==undefined&&body.userId!==accountId)return json({error:'Account denied'},403);
-      const sessionRecord=await sealRecord(this.env.JAN_PROXY_KEY,accountId,'portal-session',{login:body.login,csrf:body.csrf,userId:accountId,authVersion:await storage.get<number>('account:auth-version:v1')??0},now+86400000);
+      const sessionRecord=await sealRecord(this.env.JAN_PROXY_KEY,accountId,'portal-session',{login:body.login,csrf:body.csrf,userId:accountId,...(typeof body.ownerOrigin==='string'&&typeof body.ownerLoginAt==='number'?{ownerOrigin:body.ownerOrigin,ownerLoginAt:body.ownerLoginAt,...(authenticatedGitHubId(body.ownerGithubId,body.ownerGithubId)?{ownerGithubId:body.ownerGithubId}:{})}:{}),authVersion:await storage.get<number>('account:auth-version:v1')??0},now+86400000);
       if(this.env.JAN_MULTI_USER_ENABLED!=='1') {await storage.put('session:'+body.hash,sessionRecord);return json({ok:true});}
       return storage.transaction(async tx=>{
         if(await tx.get('account:closing:v1')||await tx.get('account:deleted:v1'))return json({error:'Account access closed'},410);
@@ -730,9 +766,9 @@ export class JanDeviceStore {
       return json({publicKey:device.publicKey,ownerId:accountId,ids});
     });
     if(path==='/device/enrollment-check') {
-      const {pro,revision}=await this.planState();
+      const {pro,revision,validUntil}=await this.planState();
       const others=Object.values(await storage.get<Record<string,Entry>>('devices')??{}).filter(d=>!d.revoked&&d.publicKey!==body.publicKey).length;
-      return json({pro,revision,allowed:pro||others<1});
+      return json({pro,revision,validUntil,allowed:pro||others<1});
     }
     if(path==='/device/import'&&this.env.JAN_MULTI_USER_ENABLED==='1') {
       const capabilities=body.capabilities;
@@ -748,7 +784,7 @@ export class JanDeviceStore {
         if(released!==undefined&&(typeof body.approvedAt!=='number'||body.approvedAt<=released))return json({error:'This approval predates the owner release. Start a fresh request.'},403);
         const previous=devices[String(body.id)];
         if(previous)return previous.ownerId===accountId&&previous.publicKey===body.publicKey&&!previous.revoked?json({ok:true}):json({error:'Device import denied'},403);
-        if(Object.values(devices).filter(d=>!d.revoked&&d.publicKey!==body.publicKey).length>=1&&!isPro(await tx.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID))return json({error:'Free accounts support one active computer'},429);
+        if(Object.values(devices).filter(d=>!d.revoked&&d.publicKey!==body.publicKey).length>=1&&!await this.effectivePro(tx,true))return json({error:'Free accounts support one active computer'},429);
         for(const device of Object.values(devices))if(!device.revoked&&device.publicKey===body.publicKey){device.revoked=true;device.revokedAt=now;this.relay.disconnect(String(device.id));if(await tx.get('active')===device.id)await tx.put('active',body.id);}
         devices[String(body.id)]={id:body.id,name:body.name,os:body.os,agentVersion:body.agentVersion,ownerId:accountId,login:body.login,publicKey:body.publicKey,capabilities:body.capabilities,created:now,revoked:false,lastSeen:0,origin:null};
         await tx.put('devices',devices);return json({ok:true});
@@ -767,7 +803,7 @@ export class JanDeviceStore {
         if(!item||item.expires<now) return json({error:'Code invalid or expired'},403);
         await tx.delete(key);
         const devices=await tx.get<Record<string,Entry>>('devices')??{};
-        if(Object.values(devices).filter(d=>!d.revoked).length>=12&&!isPro(await tx.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID)) return json({error:'Device limit reached'},429);
+        if(Object.values(devices).filter(d=>!d.revoked).length>=12&&!await this.effectivePro(tx,true)) return json({error:'Device limit reached'},429);
         const id=body.id as string;
         devices[id]={id,name:body.name,login:item.login,created:now,revoked:false,lastSeen:0,origin:null};
         await tx.put('devices',devices);
@@ -801,7 +837,7 @@ export class JanDeviceStore {
     if(path==='/device/status-summary') {
       const devices=await storage.get<Record<string,Entry>>('devices')??{};
       const sessions=await storage.get<Record<string,{expires:number}>>('session:index:v1')??{};
-      return json({activeBrowserSessions:Object.values(sessions).filter(session=>session.expires>now).length,recordedToolCalls:await storage.get<number>('calls')??0,plan:isPro(await storage.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID)?'pro':'free',devices:Object.values(devices).filter(device=>!device.revoked).map(device=>({
+      return json({activeBrowserSessions:Object.values(sessions).filter(session=>session.expires>now).length,recordedToolCalls:await storage.get<number>('calls')??0,plan:await this.effectivePro(storage)?'pro':'free',complimentary:(await storage.get<{until:number}>('billing:complimentary:v1'))?.until!>now,devices:Object.values(devices).filter(device=>!device.revoked).map(device=>({
         name:device.name,
         online:device.publicKey?this.relay.getSession(String(device.id))?.online===true:null,
       }))});
@@ -813,7 +849,7 @@ export class JanDeviceStore {
       const usage=await storage.get<Usage>('usage:daily:v1')??null;
       const activity=await storage.get<Activity[]>('activity:recent:v1')??[];
       const subscriptions=await storage.get<Subscriptions>('billing:subscriptions:v1')??null;
-      return json({active,devices:Object.values(devices).map(({id,name,login,created,revoked,lastSeen,os,agentVersion,capabilities,publicKey,calls})=>({id,name,login,created,revoked,lastSeen,os,agentVersion,capabilities,calls:Number(calls)||0,...(publicKey?{online:this.relay.getSession(String(id))?.online===true}:{})})),calls,usage,monthly:monthlyUsage(usage,now),plan:isPro(subscriptions,this.env.PADDLE_PRICE_ID)?'pro':'free',billing:Object.values(subscriptions??{}).map(({id,status,cancelAt})=>({id,status,cancelAt:cancelAt??null})),activity:activity.slice(-20).reverse(),measuredAt:now});
+      return json({active,devices:Object.values(devices).map(({id,name,login,created,revoked,lastSeen,os,agentVersion,capabilities,publicKey,calls})=>({id,name,login,created,revoked,lastSeen,os,agentVersion,capabilities,calls:Number(calls)||0,...(publicKey?{online:this.relay.getSession(String(id))?.online===true}:{})})),calls,usage,monthly:monthlyUsage(usage,now),plan:await this.effectivePro(storage)?'pro':'free',billing:Object.values(subscriptions??{}).map(({id,status,cancelAt})=>({id,status,cancelAt:cancelAt??null})),activity:activity.slice(-20).reverse(),measuredAt:now});
     }
     if(path==='/device/revoke-all') {
       return storage.transaction(async tx=>{
@@ -853,7 +889,7 @@ export class JanDeviceStore {
         if(await tx.get('account:closing:v1')||await tx.get('account:deleted:v1'))return json({error:'Account access closed'},410);
         const usage=await tx.get<Usage>('usage:daily:v1')??{started:now,days:{}};
         const month=monthlyUsage(usage,now);
-        if(month.used>=month.limit&&!isPro(await tx.get<Subscriptions>('billing:subscriptions:v1')??null,this.env.PADDLE_PRICE_ID))return json({error:'Monthly tool-call limit reached',resetsAt:month.resetsAt},429);
+        if(month.used>=month.limit&&!await this.effectivePro(tx,true))return json({error:'Monthly tool-call limit reached',resetsAt:month.resetsAt},429);
         const window=await tx.get<{started:number;count:number}>('usage:minute:v1')??{started:now,count:0};
         if(now-window.started>=60000){window.started=now;window.count=0;}
         if(window.count>=120)return json({error:'Account tool-call rate limit reached'},429);

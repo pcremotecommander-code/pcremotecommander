@@ -1,3 +1,4 @@
+import {prepareOwnerSession} from './helpers/owner-console-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JanDeviceStore} from '../src/device_store.ts';
@@ -20,13 +21,14 @@ test('owner creates categories and publishes, edits, hides, deletes and restores
   env.DEVICES={idFromName:id=>id,get:()=>({fetch:(url,init)=>object.fetch(new Request(url,init))})};
   const token='T'.repeat(43),csrf='C'.repeat(43);
   await storage.put('session:'+await digest(token),{login:'test-owner',userId:'1234',csrf,expires:Date.now()+60000});
+  await prepareOwnerSession(storage,env,token,csrf);
   const call=(path,init={},role='owner')=>portal(new Request(base+path,{...init,headers:{Cookie:'__Host-JanPortal='+token,...init.headers}}),{...env,JAN_SITE_ROLE:role});
   const post=(fields,headers={})=>call('/admin/prompts',{method:'POST',headers:{Origin:base,'Content-Type':'application/x-www-form-urlencoded',...headers},body:new URLSearchParams({csrf,...fields})});
   const category=crypto.randomUUID(),id=crypto.randomUUID();
   assert.equal(siteRouteAllowed('owner','/admin/prompts'),true);
   assert.equal(siteRouteAllowed('public','/admin/prompts'),false);
   assert.equal((await portal(new Request(base+'/admin/prompts'),env)).status,403);
-  assert.equal((await call('/admin/prompts',{},'public')).status,403);
+  assert.equal((await call('/admin/prompts',{},'public')).status,404);
   assert.equal((await websitePromptStore(storage,'/website-prompts/list',{},'9876','1234')).status,403);
   assert.equal((await post({action:'category-add',id:category,name:'Research'})).status,303);
   const fields={action:'save',id,title:'Synthetic test prompt',description:'An owner-created task',category,prompt:'</textarea><script>alert(1)</script>',published:'yes'};

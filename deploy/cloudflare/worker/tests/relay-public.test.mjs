@@ -13,6 +13,7 @@ test('public relay route does not expose DO dispatch through unauthenticated URL
  assert.doesNotMatch(source,/path==='\/relay\/dispatch'/);
  assert.doesNotMatch(source,/path==='\/jan-relay\/dispatch'/);
 });
-test('owner operations path reaches the portal authorization handler',()=>{
- assert.match(source,/path==='\/admin'\|\|path==='\/admin\/subscriptions'\|\|path==='\/admin\/prompts'\|\|path==='\/admin\/accounts'\|\|path==='\/library\/prompts'\|\|path\.startsWith\('\/devices'\)/);
+test('owner operations paths reach the portal authorization handler',()=>{
+ assert.match(source,/path==='\/admin'\|\|path\.startsWith\('\/admin\/'\)/);
+ assert.match(source,/return portal\(request/);
 });

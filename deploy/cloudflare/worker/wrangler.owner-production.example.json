@@ -19,7 +19,10 @@
     "JAN_SITE_ROLE": "owner",
     "PADDLE_PRICE_ID": "",
     "PADDLE_ENVIRONMENT": "production",
-    "PADDLE_LIVE_ENABLED": "0"
+    "PADDLE_LIVE_ENABLED": "0",
+    "PCRC_OWNER_GITHUB_ID": "5678",
+    "PCRC_PUBLIC_SITE_ORIGIN": "https://pc-remote-commander.example.workers.dev",
+    "SUPABASE_URL": "https://aaaaaaaaaaaaaaaaaaaa.supabase.co"
   },
   "durable_objects": {
     "bindings": [

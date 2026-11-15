@@ -14,6 +14,9 @@ test('public configuration examples isolate resources and disable unconfigured p
  assert.notEqual(publicConfig.kv_namespaces[0].id,staging.kv_namespaces[0].id);
  assert.notEqual(publicConfig.r2_buckets[0].bucket_name,staging.r2_buckets[0].bucket_name);
  assert.deepEqual(owner.assets,{directory:'./owner-public'});
+ for(const config of [publicConfig,owner])assert.equal(config.vars.PCRC_OWNER_GITHUB_ID,'5678');
+ assert.equal(owner.vars.PCRC_PUBLIC_SITE_ORIGIN,publicConfig.vars.JAN_PUBLIC_ORIGIN);
+ assert.equal(owner.vars.SUPABASE_URL,publicConfig.vars.SUPABASE_URL);
  assert.deepEqual(readFileSync(new URL('../owner-public/brand/pcrc-logo.svg',import.meta.url)),readFileSync(new URL('../public/brand/pcrc-logo.svg',import.meta.url)));
  for(const config of [publicConfig,owner,staging]){
   assert.equal(config.vars.ALLOWED_GITHUB_ID,'1234');

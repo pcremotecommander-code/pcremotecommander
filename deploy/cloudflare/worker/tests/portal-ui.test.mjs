@@ -1,3 +1,4 @@
+import {prepareOwnerSession} from './helpers/owner-console-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JanDeviceStore} from '../src/device_store.ts';
@@ -245,6 +246,7 @@ test('public setup keeps commands first, then assistant setup, verification and 
 test('owner subscription page searches an account and only a confirmed CSRF form cancels it',async()=>{
   const f=await fixture(),subscription='sub_'+'a'.repeat(26),price='pri_01m5z5ay4y4kv7dkrcmz7r3s7h',calls=[];
   Object.assign(f.env,{JAN_SITE_ROLE:'owner',JAN_MULTI_USER_ENABLED:'1',PADDLE_PRICE_ID:price,PADDLE_SANDBOX_API_KEY:'synthetic-sandbox-key'});
+  await prepareOwnerSession(f.storage,f.env,f.token,f.csrf);
   await f.storage.put('directory:account:1234','test-owner');
   await f.storage.put('directory:login:test-owner','1234');
   await f.storage.put('billing:subscriptions:v1',{[subscription]:{id:subscription,eventId:'evt_'+'a'.repeat(26),occurredAt:1,status:'active',priceId:price}});
@@ -262,9 +264,9 @@ test('owner subscription page searches an account and only a confirmed CSRF form
   assert.equal((await f.post('/admin/subscriptions',{account:'1234',id:subscription,action:'cancel',confirm:'yes',csrf:'wrong'})).status,403);
   assert.equal((await f.post('/admin/subscriptions',{account:'1234',id:subscription,action:'cancel'})).status,403);
   assert.equal((await f.post('/admin/subscriptions',{account:'9999',id:subscription,action:'cancel',confirm:'yes'})).status,404);
-  const wrongBinding=await portal(new Request(base+'/admin/subscriptions',{method:'POST',headers:{Cookie:'__Host-JanPortal='+f.token,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:f.csrf,account:'1234',id:subscription,action:'cancel',confirm:'yes'})}),f.env,async()=>Response.json({data:{id:subscription,status:'active',custom_data:{account_id:'9999'}}}));
+  const wrongBinding=await portal(new Request(base+'/admin/subscriptions',{method:'POST',headers:{Cookie:'__Host-JanPortal='+f.token,Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:f.csrf,account:'1234',id:subscription,action:'cancel',confirm:'yes'})}),f.env,async()=>Response.json({data:{id:subscription,status:'active',custom_data:{account_id:'9999'}}}));
   assert.equal(wrongBinding.status,403);
-  const valid=await portal(new Request(base+'/admin/subscriptions',{method:'POST',headers:{Cookie:'__Host-JanPortal='+f.token,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:f.csrf,account:'1234',id:subscription,action:'cancel',confirm:'yes'})}),f.env,api);
+  const valid=await portal(new Request(base+'/admin/subscriptions',{method:'POST',headers:{Cookie:'__Host-JanPortal='+f.token,Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:f.csrf,account:'1234',id:subscription,action:'cancel',confirm:'yes'})}),f.env,api);
   assert.equal(valid.status,303);
   assert.equal(calls.filter(call=>call.url.endsWith('/cancel')).length,1);
   const data=await (await f.call('/devices/state')).json();
@@ -274,6 +276,7 @@ test('owner subscription page searches an account and only a confirmed CSRF form
 test('owner username search resolves a registered older account without exposing an unregistered GitHub user',async()=>{
   const f=await fixture();
   Object.assign(f.env,{JAN_SITE_ROLE:'owner',JAN_MULTI_USER_ENABLED:'1'});
+  await prepareOwnerSession(f.storage,f.env,f.token,f.csrf);
   await f.storage.put('directory:account:1234',true);
   const request=()=>new Request(base+'/admin/subscriptions?q=OldUser',{headers:{Cookie:'__Host-JanPortal='+f.token}});
   const found=await portal(request(),f.env,async (url,init)=>{

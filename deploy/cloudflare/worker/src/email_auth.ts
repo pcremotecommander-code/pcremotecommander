@@ -128,13 +128,20 @@ export async function emailAuth(request:Request,env:DeviceEnv,fetcher:typeof fet
    return portalPage('<section class="panel center-card" data-email-verification="complete" data-flow="'+completed.flow+'" data-target="'+escaped(completed.target)+'"><div class="panel-body"><h1>Verification completed</h1><p>Your email is verified and you are signed in. Returning to your original PCRC tab…</p><p role="status" data-verification-status>You can also open your dashboard below.</p><div class="action-row"><a class="button primary" href="'+escaped(completed.target)+'">Open dashboard</a><button class="button neutral" type="button" data-verification-close>Close this tab</button></div></div></section>','Email verified',{emailVerification:true,headers:{'Referrer-Policy':'same-origin'}});
   }
   if(path==='/devices/email/callback'&&request.method==='GET'){
-   if([...url.searchParams.keys()].some(k=>k!=='code')||!url.searchParams.get('code')||url.searchParams.get('code')!.length>512)throw new AuthRejected(400,'This email link is invalid or expired. Request a new one.');
-   const flow=await unseal<Flow>(request,env,FLOW,'email-flow');
+   if([...url.searchParams.keys()].some(k=>k!=='code'&&k!=='reset')||url.searchParams.getAll('code').length!==1||url.searchParams.getAll('reset').length>1||!url.searchParams.get('code')||url.searchParams.get('code')!.length>512)throw new AuthRejected(400,'This email link is invalid or expired. Request a new one.');
+   let invited:{accountId:string;subject:string;email:string;verifier:string}|undefined,flow:Flow;
+   if(url.searchParams.has('reset')){
+    const reset=url.searchParams.get('reset')!;if(!/^[A-Za-z0-9_-]{43}$/.test(reset))throw new AuthRejected(400,'This reset link is invalid or expired.');
+    try{invited=await deviceStore(env,'/owner-data/reset-consume',{hash:await digest(reset)});}catch{throw new AuthRejected(400,'This reset link expired or was already used. Request a new reset.');}
+    flow={mode:'forgot',verifier:invited!.verifier,csrf:'',returnTo:'/devices'};
+   }else flow=await unseal<Flow>(request,env,FLOW,'email-flow');
    if(!['signup','link','forgot'].includes(flow.mode))throw new AuthRejected();
    const data=await api(env,'/token?grant_type=pkce',{auth_code:url.searchParams.get('code'),code_verifier:flow.verifier},undefined,'POST',fetcher);
    const user=await verifiedUser(env,data.access_token,fetcher);
+   if(invited&&(user.id!==invited.subject||user.email.toLowerCase()!==invited.email))throw new AuthRejected(403,'This reset link does not match the account or its current email. Request a new reset.');
    if(flow.mode==='forgot'){
     const identity=await resolve(env,user),nonce=randomCode();
+    if(invited&&identity.id!==invited.accountId)throw new AuthRejected(403,'This account changed. Request a new reset.');
     await deviceStore(env,'/email-recovery/create',{hash:await digest(nonce),subject:user.id},identity.id);
     const value=await seal(env,'email-reset',{token:data.access_token,subject:user.id,accountId:identity.id,nonce,csrf:randomCode()},300);
     return new Response(null,{status:303,headers:{Location:config(env).publicOrigin+'/devices/email/reset','Set-Cookie':cookie(RESET,value,300),'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});

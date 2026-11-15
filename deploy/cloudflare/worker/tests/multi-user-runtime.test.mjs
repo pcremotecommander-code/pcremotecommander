@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import {totpCode} from '../src/owner_security.ts';
 const require=createRequire(import.meta.url);
 const {keys,proof}=require('../../../npm/jan-commander/bin/pair-device.cjs');
 const {handshake}=require('../../../npm/jan-commander/bin/relay-agent.cjs');
@@ -14,19 +15,28 @@ const digest=async value=>Buffer.from(await crypto.subtle.digest('SHA-256',new T
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 test('owner runtime routes account management through owner authentication',async()=>{
-  const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'owner',modules:true,script:readFileSync(new URL('../build/index.js',import.meta.url),'utf8'),compatibilityDate:'2026-10-15',compatibilityFlags:['global_fetch_strictly_public'],kvNamespaces:['OAUTH_KV'],durableObjects:{DEVICES:{className:'JanDeviceStore',useSQLite:true}},bindings:{...bindings,JAN_SITE_ROLE:'owner'},outboundService:async request=>{
+  const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'owner',modules:true,script:readFileSync(new URL('../build/index.js',import.meta.url),'utf8'),compatibilityDate:'2026-10-15',compatibilityFlags:['global_fetch_strictly_public'],kvNamespaces:['OAUTH_KV'],durableObjects:{DEVICES:{className:'JanDeviceStore',scriptName:'public-store',useSQLite:true}},bindings:{...bindings,JAN_SITE_ROLE:'owner',PCRC_OWNER_GITHUB_ID:'5678'},outboundService:async request=>{
     if(request.url==='https://github.com/login/oauth/access_token')return Response.json({access_token:'synthetic-provider-token'});
-    if(request.url==='https://api.github.com/user')return Response.json({id:1234,login:'synthetic-owner'});
+    if(request.url==='https://api.github.com/user')return Response.json({id:5678,login:'synthetic-new-owner'});
     throw Error('Unexpected provider');
-  }}]}));
+  }},{name:'public-store',modules:true,script:readFileSync(new URL('../build/index.js',import.meta.url),'utf8'),compatibilityDate:'2026-10-15',compatibilityFlags:['global_fetch_strictly_public'],kvNamespaces:['OAUTH_KV'],durableObjects:{DEVICES:{className:'JanDeviceStore',useSQLite:true}},bindings:{...bindings,JAN_SITE_ROLE:'public',PCRC_OWNER_GITHUB_ID:'5678'}}]}));
   try{
     const call=(route,init={})=>mf.dispatchFetch(base+route,{redirect:'manual',...init});
     const signedOut=await call('/admin/accounts');assert.equal(signedOut.status,403);assert.match(await signedOut.text(),/Owner sign-in required/);
     const start=await call('/owner/login'),state=new URL(start.headers.get('Location')).searchParams.get('state');
     const signedIn=await call('/callback?'+new URLSearchParams({state,code:'synthetic'}),{headers:{Cookie:cookie(start)}});
     assert.equal(signedIn.status,302);
+    assert.match(cookie(signedIn),/__Host-JanPortal=1234\./,'owner sign-in retains the operator storage namespace');
     const page=await call('/admin/accounts',{headers:{Cookie:cookie(signedIn)}});
-    assert.equal(page.status,200);assert.match(await page.text(),/User accounts/);
+    assert.equal(page.status,303);assert.match(page.headers.get('Location'),/\/admin\/security$/);
+    const security=await call('/admin/security',{headers:{Cookie:cookie(signedIn)}});
+    const csrf=/name="csrf" value="([A-Za-z0-9_-]+)"/.exec(await security.text())?.[1];assert.ok(csrf);
+    const post=(route,data)=>call(route,{method:'POST',headers:{Cookie:cookie(signedIn),Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,...data}).toString()});
+    const setup=await post('/admin/security/setup',{});assert.equal(setup.status,200);
+    const secret=/<code class="setup-key">([A-Z2-7]{32})<\/code>/.exec(await setup.text())?.[1];assert.ok(secret);
+    const verified=await post('/admin/security/verify',{code:await totpCode(secret,Math.floor(Date.now()/30000))});
+    assert.equal(verified.status,200);assert.match(await verified.text(),/recovery-codes/);
+    assert.equal((await call('/admin',{headers:{Cookie:cookie(signedIn)}})).status,200);
   }finally{await mf.dispose();}
 });
 

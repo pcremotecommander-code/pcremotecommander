@@ -130,7 +130,7 @@ export default {
         request=new Request(request,{body:body as BodyInit});
       } catch {return failure(413,'Request too large');}
     }
-    if(path==='/'||path==='/support'||path==='/admin'||path==='/admin/subscriptions'||path==='/admin/prompts'||path==='/admin/accounts'||path==='/library/prompts'||path.startsWith('/devices')||path==='/owner/login'||path==='/owner/logout'||(path==='/callback'&&new URL(request.url).searchParams.get('state')?.startsWith('janportal.'))) {
+    if(path==='/'||path==='/support'||(path==='/admin'||path.startsWith('/admin/'))||path==='/library/prompts'||path.startsWith('/devices')||path==='/owner/login'||path==='/owner/logout'||(path==='/callback'&&new URL(request.url).searchParams.get('state')?.startsWith('janportal.'))) {
       return portal(request,path==='/devices/account/delete'?{...env,OAUTH_PROVIDER:getOAuthApi(oauthOptions(env),env)}:env);
     }
     const provider=new OAuthProvider<Env>(oauthOptions(env));

@@ -32,7 +32,8 @@
     "JAN_SITE_ROLE": "public",
     "PADDLE_PRICE_ID": "",
     "PADDLE_ENVIRONMENT": "production",
-    "PADDLE_LIVE_ENABLED": "0"
+    "PADDLE_LIVE_ENABLED": "0",
+    "PCRC_OWNER_GITHUB_ID": "5678"
   },
   "kv_namespaces": [
     {
