@@ -62,8 +62,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Output PCRC_CI_POWERSHELL_READY
+          Set-MpPreference -DisableRealtimeMonitoring $false
+          if (-not (Get-MpComputerStatus).RealTimeProtectionEnabled) { throw 'Hosted runner cannot provide required Defender protection' }
           Get-MpComputerStatus | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge | ConvertTo-Json -Compress
+          python -c "import os, subprocess; from jan_mcp_commander.environment import runtime_environment; subprocess.run([os.environ['SystemRoot'] + '/System32/WindowsPowerShell/v1.0/powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output PCRC_CI_SANITIZED_ENV_READY'], env=runtime_environment(), check=True, timeout=90)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -c "from jan_mcp_commander.security_scan import scan_bytes; print(scan_bytes(b'PCRC CI synthetic fixture')['result'])"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Python tests

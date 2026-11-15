@@ -8,6 +8,8 @@ The Linux runner is Ubuntu 22.04: newer hosted Ubuntu images restrict Chromium's
 
 Windows installs Chromium without Playwright's optional Windows Server media-feature installation; the synthetic browser fixtures do not play video. Native media workers are tested using the pinned PyAV and NumPy development dependencies.
 
+The disposable Windows runner enables Defender real-time protection and verifies it before native tests, then warms the same restricted PowerShell environment used by PCRC. It fails if the runner cannot provide protection; it never disables tamper protection or bypasses PCRC scanning. These runner-only steps do not configure a paired computer or production. See [Microsoft's real-time protection configuration](https://learn.microsoft.com/en-us/defender-endpoint/configure-real-time-protection-microsoft-defender-antivirus).
+
 `PCRC_SOURCE_ONLY_TESTS=1` labels unavailable private recordings and release-binary checks as skipped. Native desktop, media, packaged-release and live public acceptance checks retain their existing opt-in prerequisites. A green source workflow does not certify all exposed tools, account isolation in production, installed release signatures, or long-running relay stability. Read the test summaries and skips before release.
 
 Run the credential check locally with `python scripts/check_source_credentials.py`. It scans tracked and unignored source, including force-added private files, without printing matched values. This pattern scan cannot recognize every secret: maintain GitHub secret scanning and rotate any credential actually exposed. Never put credentials in fixtures or workflow logs.
