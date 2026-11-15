@@ -52,8 +52,12 @@ jobs:
           npm ci --prefix deploy/cloudflare/worker
           npm ci --prefix deploy/mcp-task-server
           npm ci --prefix deploy/npm/jan-commander
-      - name: Install synthetic-browser prerequisite
+      - name: Install Linux browser and required libraries
+        if: runner.os == 'Linux'
         run: python -m playwright install --with-deps chromium
+      - name: Install Windows synthetic browser
+        if: runner.os == 'Windows'
+        run: python -m playwright install chromium
       - name: Warm and verify Windows security prerequisite
         if: runner.os == 'Windows'
         shell: powershell
