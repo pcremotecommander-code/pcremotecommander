@@ -42,3 +42,5 @@ Cloudflare configuration files are examples. Replace their placeholder origins, 
 See [release process](release-process.md), [security model](security-model.md), [device pairing](device-pairing.md) and [acceptance matrix](acceptance-matrix.md).
 
 The Worker dry-run build explicitly uses the sanitized `wrangler.staging.json` development example. Actual deployment requires an explicitly reviewed configuration; `npm run deploy` alone has no default production configuration in this source checkout.
+
+Automated verification is described in [source verification](continuous-integration.md).

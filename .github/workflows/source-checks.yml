@@ -1,0 +1,80 @@
+name: Source checks
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    branches: [main, next]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      PCRC_SOURCE_ONLY_TESTS: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        id: python
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Check source credentials and whitespace
+        run: |
+          python scripts/check_source_credentials.py
+          git diff --check
+      - name: Install source dependencies
+        run: |
+          python -m pip install -e ".[dev,browser]"
+          npm ci --prefix deploy/cloudflare/worker
+          npm ci --prefix deploy/mcp-task-server
+          npm ci --prefix deploy/npm/jan-commander
+      - name: Python tests
+        run: python -m pytest -q -ra
+      - name: Gateway types and tests (includes dry-run build)
+        env:
+          JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          npm run check --prefix deploy/cloudflare/worker
+          npm test --prefix deploy/cloudflare/worker
+      - name: Launcher tests
+        run: node --test deploy/npm/launcher/tests/*.test.cjs
+      - name: Install synthetic-browser prerequisite
+        run: python -m playwright install --with-deps chromium
+      - name: Build MCP test client
+        run: npm run build --prefix deploy/mcp-task-server
+      - name: MCP integration tests (Linux virtual display)
+        if: runner.os == 'Linux'
+        env:
+          JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+          JAN_MCP_BROWSER_CHANNEL: chromium
+        run: xvfb-run -a node --test --test-concurrency=1 'deploy/mcp-task-server/dist/**/*.test.js'
+      - name: MCP integration tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+          JAN_MCP_BROWSER_CHANNEL: chromium
+        run: node --test --test-concurrency=1 'deploy/mcp-task-server/dist/**/*.test.js'

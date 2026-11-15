@@ -15,7 +15,7 @@ test('audit blockers: real teaching, reviewed replay, failed-run reconciliation 
  const address=http.address();assert.ok(address&&typeof address==='object');
  const origin='http://127.0.0.1:'+address.port;
  const previous=process.env.JAN_MCP_STATE_DIR;process.env.JAN_MCP_STATE_DIR=join(root,'private');
- const service=new PythonService({python:process.env.JAN_TEST_PYTHON||resolve(import.meta.dirname,'../../../.venv/Scripts/python.exe'),workspace,control:true,capabilities:'files,browser,commands',browserChannel:'msedge'});
+ const service=new PythonService({python:process.env.JAN_TEST_PYTHON||resolve(import.meta.dirname,'../../../.venv/Scripts/python.exe'),workspace,control:true,capabilities:'files,browser,commands',browserChannel:process.env.JAN_MCP_BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')});
  if(previous===undefined)delete process.env.JAN_MCP_STATE_DIR;else process.env.JAN_MCP_STATE_DIR=previous;
  const [a,b]=InMemoryTransport.createLinkedPair();const server=createTaskServer(service,{control:true,capabilities:new Set(['files','browser','commands'])});
  const client=new Client({name:'pcrc-audit-workflow',version:'1'});let lease:Record<string,any>={};

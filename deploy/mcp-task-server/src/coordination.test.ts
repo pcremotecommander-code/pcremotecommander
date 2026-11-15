@@ -11,7 +11,7 @@ test('four MCP clients share real assignments and queue overlapping claims witho
   const root = await mkdtemp(join(tmpdir(), 'pcrc-team-'));
   const workspace = join(root, 'workspace'); await mkdir(workspace);
   const previous = process.env.JAN_MCP_STATE_DIR; process.env.JAN_MCP_STATE_DIR = join(root, 'private');
-  const service = new PythonService({ python: resolve(import.meta.dirname, '../../../.venv/Scripts/python.exe'), workspace, control: true, capabilities: 'files' });
+  const service = new PythonService({ python: process.env.JAN_TEST_PYTHON || resolve(import.meta.dirname, '../../../.venv/Scripts/python.exe'), workspace, control: true, capabilities: 'files' });
   if (previous === undefined) delete process.env.JAN_MCP_STATE_DIR; else process.env.JAN_MCP_STATE_DIR = previous;
   const connect = async (name: string) => {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();

@@ -21,7 +21,7 @@ const digest=async s=>Buffer.from(await crypto.subtle.digest('SHA-256',new TextE
 test('Cloudflare runtime: browser approval, signed WSS, real OAuth and Python MCP roundtrip, reconnect and revoke',{timeout:45000},async()=>{
   const temp=mkdtempSync(path.join(tmpdir(),'pc-commander-e2e-'));
   const root=fileURLToPath(new URL('../../../../',import.meta.url));
-  const python=path.join(root,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
+  const python=process.env.JAN_TEST_PYTHON||path.join(root,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
   const workspace=path.join(temp,'workspace');mkdirSync(workspace);
   const childEnv={...process.env,JAN_MCP_STATE_DIR:path.join(temp,'state'),JAN_MCP_WORKSPACE:workspace};
   const prepared=spawnSync(python,['-m','jan_mcp_commander.pairing_state','prepare','--workspace',workspace],{cwd:root,env:childEnv,encoding:'utf8',windowsHide:true});
