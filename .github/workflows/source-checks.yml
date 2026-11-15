@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     env:
       PCRC_SOURCE_ONLY_TESTS: '1'
       WRANGLER_SEND_METRICS: 'false'
