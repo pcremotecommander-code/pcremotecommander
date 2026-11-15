@@ -911,7 +911,11 @@ class ControlCommander(PortableCommander):
             elif action == 'hotkey':
                 if not keys or any(k not in ui.KEYBOARD_KEYS for k in keys):
                     raise PermissionDenied('Invalid key combination')
-                ui.hotkey(*keys)
+                if os.name=='nt':
+                    from .windows_input import press_hotkey
+                    ui.failSafeCheck()
+                    press_hotkey([ui.platformModule.keyboardMapping.get(key) for key in keys])
+                else:ui.hotkey(*keys)
             return {'performed': action, 'screen_width': width, 'screen_height': height}
 
     def close_control(self):

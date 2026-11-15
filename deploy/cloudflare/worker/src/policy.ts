@@ -6,7 +6,7 @@ import {readActionResult} from './action_result.ts';
 import {approvalCardUri,approvalCardResult,approvalCardResource,includeApprovalCard} from './approval_card.ts';
 import {resultPreviewUri,resultPreviewResource,includeResultPreview} from './result_preview.ts';
 import {includeTextResult} from '../../../mcp-task-server/src/text-result.ts';
-import {inspectPublicOutput} from '../../../mcp-task-server/src/privacy-guard.ts';
+import {inspectPublicOutput,PrivacyError} from '../../../mcp-task-server/src/privacy-guard.ts';
 import privacyRules from '../../../../src/jan_mcp_commander/privacy-rules.json' with {type:'json'};
 import {hasReadScope,hasControlScope} from './oauth_scopes.ts';
 import {authenticatedMcpRateLimit} from './public_rate_limit.ts';
@@ -42,10 +42,31 @@ export interface Settings {
 }
 export const MAX_BODY = 262144;
 export const MAX_RESPONSE = 1048576;
+function privacyToolError(id:unknown,error:unknown):any {
+  const code=error instanceof PrivacyError?error.code:'SENSITIVE_CONTENT_BLOCKED';
+  const summary=error instanceof PrivacyError?error.message:privacyRules.error;
+  return {jsonrpc:'2.0',id,result:{isError:true,content:[{type:'text',text:summary}],structuredContent:{ok:false,summary,error_code:code,data:{error_code:code}}}};
+}
 function privateToolResult(reply:any):any {
-  try {inspectPublicOutput([reply?.result??{},reply?.error??{}],privacyRules);if(reply?.result)includeTextResult(reply.result);return reply;}catch {
-    return {jsonrpc:'2.0',id:reply?.id,result:{isError:true,content:[{type:'text',text:privacyRules.error}],structuredContent:{error_code:'SENSITIVE_CONTENT_BLOCKED'}}};
-  }
+  try {
+    const result=reply?.result,values:unknown[]=[reply?.error??{}];
+    if(result&&typeof result==='object'&&!Array.isArray(result)){
+      // Wire wrappers must not consume the payload's unchanged depth budget.
+      const {content,structuredContent,...metadata}=result;
+      values.push(metadata,structuredContent);
+      if(Array.isArray(content)){
+        if(content.length>10000)throw new PrivacyError('OUTPUT_LIMIT_EXCEEDED','Output exceeded privacy inspection limits. Request a smaller result.');
+        for(const part of content){
+          if(part&&typeof part==='object'&&part.type==='text'&&typeof part.text==='string'){
+            const {text,...attributes}=part;values.push(attributes,text);
+          }else values.push(part);
+        }
+      }else if(content!==undefined)values.push({content});
+    }else values.push(result??{});
+    inspectPublicOutput(values,privacyRules);
+    if(result)includeTextResult(result);
+    return reply;
+  }catch(error){return privacyToolError(reply?.id,error);}
 }
 function clientPayload(payload:string,method:string,nativeHost:boolean,relayCall?:unknown):Uint8Array {
   const reply=JSON.parse(payload);
@@ -261,8 +282,8 @@ export async function proxyMcp(request: Request, env: Settings, auth: {audience?
   const version=request.headers.get('mcp-protocol-version');
   if(version && !/^\d{4}-\d{2}-\d{2}$/.test(version)) return failure(400,'Invalid protocol header');
   const requested=JSON.parse(new TextDecoder().decode(body));
-  if(toolCall)try {inspectPublicOutput([requested.params?.arguments??{}],privacyRules);}catch {
-    return Response.json({jsonrpc:'2.0',id:requested.id,result:{isError:true,content:[{type:'text',text:privacyRules.error}],structuredContent:{error_code:'SENSITIVE_CONTENT_BLOCKED'}}},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+  if(toolCall)try {inspectPublicOutput([requested.params?.arguments??{}],privacyRules);}catch(error) {
+    return Response.json(privacyToolError(requested.id,error),{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
   }
   if(nativeHost&&((toolCall&&['test_approval_dialog','test_approval_card'].includes(requested.params?.name))||(methodName==='resources/read'&&requested.params?.uri===approvalCardUri))){
     return Response.json({jsonrpc:'2.0',id:requested.id,result:{isError:true,content:[{type:'text',text:`PCRC custom approval diagnostics are disabled for this ${nativeHost==='chatgpt'?'ChatGPT':'Claude'} connection. Use the client's own tool confirmations. No computer action was authorized or executed.`}]}},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});

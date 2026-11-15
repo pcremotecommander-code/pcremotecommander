@@ -8,12 +8,12 @@ const crypto=require('node:crypto');
 const {pipeline}=require('node:stream/promises');
 const {spawn,spawnSync}=require('node:child_process');
 
-const version='0.7.0-beta.43';
-const sha256='df97a5d69fbc77271e0ea220b70588b0d0ad154bf5f53161d1997bbd7c98d5a1';
-const url='https://pc-remote-commander.pcremotecommander.workers.dev/downloads/windows/pcremotecommander-0.7.0-beta.43.tgz';
+const version='0.7.0-beta.44';
+const sha256='0aff1a1f5bdc1a7e27fac3b42a9c1a47215ef144bb6f39d624e35f7d0d28ce19';
+const url='https://pc-remote-commander.pcremotecommander.workers.dev/downloads/windows/pcremotecommander-0.7.0-beta.44.tgz';
 const maximumBytes=100*1024*1024;
-const posixInstallerUrl='https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta43.sh';
-const posixInstallerSha256='aef3094119f99d7c63b3405657633530f0c4e4d2b3e97b7eda2883680316ed6f';
+const posixInstallerUrl='https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta44.sh';
+const posixInstallerSha256='bef8e5f9cb0cdfc4cca0b76b3aca8fce2e6dbd1a8a704d0a6e89e9643d19c9f0';
 
 function posixArgs(argv) {
   const action=argv[0]??'setup',rest=argv.slice(1);

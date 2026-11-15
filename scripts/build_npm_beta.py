@@ -14,7 +14,7 @@ from build_source_preview import ROOT
 
 
 NAME = "pcremotecommander"
-VERSION = "0.7.0-beta.43"
+VERSION = "0.7.0-beta.44"
 PDFIUM_WHEEL = ROOT/'work/dependency-wheels/pypdfium2-5.14.0-py3-none-win_amd64.whl'
 PDFIUM_SHA256 = '149fd5c6397b8df8bf7911a93506eff0be874f877afe7ac936cf5d37d21a6a06'
 PDF_WHEEL = ROOT/'work/dependency-wheels/pypdf-6.21.4-py3-none-any.whl'

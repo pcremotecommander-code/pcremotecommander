@@ -49,12 +49,12 @@ test('integrity failure stops before unpacking or executing',async()=>{
 });
 
 test('pinned full bundle unpacks and is reused without a second download',async t=>{
-  const source=path.resolve(__dirname,'../../../../work/beta43-search-pack/pcremotecommander-0.7.0-beta.43.tgz');
+  const source=path.resolve(__dirname,'../../../../work/beta44-input-pack/pcremotecommander-0.7.0-beta.44.tgz');
   if(!fs.existsSync(source))return t.skip('local full-bundle artifact unavailable');
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'pcrc-good-bundle-'));
   let downloads=0;
   try {
-    assert.equal(shaFile(source),'df97a5d69fbc77271e0ea220b70588b0d0ad154bf5f53161d1997bbd7c98d5a1');
+    assert.equal(shaFile(source),'0aff1a1f5bdc1a7e27fac3b42a9c1a47215ef144bb6f39d624e35f7d0d28ce19');
     const options={root,fetchArchive:async file=>{downloads++;fs.copyFileSync(source,file);}};
     const entry=await ensurePayload(options);
     assert.equal(fs.existsSync(entry),true);

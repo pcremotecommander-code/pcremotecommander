@@ -21,3 +21,35 @@ test('sensitive arguments never enter the approval queue and sensitive legacy re
  const resource=await proxyMcp(new Request(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'resources/read',params:{uri:'app://pcrc/files/ordinary.txt'}})}),env,auth,{accountId:'5678'});
  const result=await resource.json();assert.equal(result.result.isError,true);assert.ok(!JSON.stringify(result).includes('synthetic-error-secret'));
 });
+
+test('document reviews keep the payload depth budget across structured and text MCP envelopes without hiding secrets',async()=>{
+ const origin='https://document-review.example.workers.dev';
+ const plan={plan_id:'a'.repeat(32),status:'previewed',jobs:[{kind:'extract_tables',status:'ready',review:{tables:[{location:'t00001',rows:[['Item','Count'],['Apples','12']]}]}}]};
+ const details={ok:true,summary:'Document review',data:plan};
+ let result={content:[{type:'text',text:details.summary},{type:'text',text:JSON.stringify(details)}],structuredContent:details};
+ const env={JAN_PUBLIC_ORIGIN:origin,JAN_ORIGIN:'https://unused.trycloudflare.com',JAN_PROXY_KEY:'A'.repeat(43),GITHUB_CLIENT_ID:'syntheticId',GITHUB_CLIENT_SECRET:'synthetic-secret',ALLOWED_GITHUB_ID:'1234',JAN_SITE_ROLE:'public',JAN_MULTI_USER_ENABLED:'1',JAN_RELAY_ENABLED:'1',DEVICES:{idFromName:id=>id,get:()=>({fetch:async(url,init)=>{
+  const path=new URL(url).pathname;
+  if(path==='/abuse/check')return new Response(null,{status:204});
+  if(path==='/account/auth-version')return Response.json({authVersion:0});
+  if(path==='/usage/increment')return Response.json({});
+  assert.equal(path,'/relay/dispatch');const envelope=JSON.parse(init.body),call=JSON.parse(envelope.payload);
+  return Response.json({type:'response',request_id:envelope.request_id,status:200,payload:JSON.stringify({jsonrpc:'2.0',id:call.id,result})});
+ }})}};
+ const call=async()=>{
+  const response=await proxyMcp(new Request(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_document_workflow',arguments:{plan_id:plan.plan_id}}})}),env,{audience:origin+'/mcp',userId:'5678',scope:['pcrc:read','pcrc:control']},{accountId:'5678'});
+  assert.equal(response.status,200);return (await response.json()).result;
+ };
+ const ordinary=await call();assert.equal(ordinary.isError,undefined);assert.deepEqual(ordinary.structuredContent,details);assert.deepEqual(JSON.parse(ordinary.content.at(-1).text),details);
+ const secret='password='+'synthetic-review-secret';
+ for(const protectedResult of [
+  {...result,structuredContent:{password:{lease_token:'A'.repeat(43)}}},
+  {...result,content:[{type:'text',text:secret}]},
+  {...result,content:[{type:'text',text:'ordinary',annotations:{password:'synthetic-review-secret'}}]},
+  {...result,unexpected:{password:'synthetic-review-secret'}},
+  {...result,content:[{type:'text',text:'{"password":"synthetic-review-secret","password":null}'}]},
+ ]){
+  result=protectedResult;const blocked=await call();assert.equal(blocked.isError,true);assert.equal(blocked.structuredContent.ok,false);assert.equal(typeof blocked.structuredContent.summary,'string');assert.equal(typeof blocked.structuredContent.data,'object');assert.ok(!JSON.stringify(blocked).includes('synthetic-review-secret'));
+ }
+ let deep='ordinary';for(let i=0;i<14;i++)deep={nested:deep};
+ result={structuredContent:deep};const bounded=await call();assert.equal(bounded.isError,true);assert.equal(bounded.structuredContent.error_code,'OUTPUT_LIMIT_EXCEEDED');
+});

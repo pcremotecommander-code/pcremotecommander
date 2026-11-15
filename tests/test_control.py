@@ -156,7 +156,9 @@ def test_native_desktop_requires_verified_foreground(control, monkeypatch):
 
 def test_desktop_adapter_bounds_failsafe_and_typing(control,monkeypatch):
     monkeypatch.setenv('XDG_SESSION_TYPE','x11');monkeypatch.setenv('DISPLAY',':1')
-    ui=SimpleNamespace(size=lambda:(1920,1080),click=Mock(),write=Mock(),hotkey=Mock(),KEYBOARD_KEYS=['ctrl','a'])
+    ui=SimpleNamespace(size=lambda:(1920,1080),click=Mock(),write=Mock(),hotkey=Mock(),failSafeCheck=Mock(),KEYBOARD_KEYS=['ctrl','a'],platformModule=SimpleNamespace(keyboardMapping={'ctrl':17,'a':65}))
+    native=Mock()
+    monkeypatch.setattr('jan_mcp_commander.windows_input.press_hotkey',native)
     monkeypatch.setitem(sys.modules,'pyautogui',ui)
     with pytest.raises(ValueError,match='inside'): control.desktop_action('click',x=1920)
     monkeypatch.setattr(control,'_foreground_window',lambda:None)
@@ -168,14 +170,17 @@ def test_desktop_adapter_bounds_failsafe_and_typing(control,monkeypatch):
     with pytest.raises(ValueError):control.desktop_action('hotkey',keys=[])
     control._desktop_frame=('upper',time.monotonic(),(1920,1080),None)
     control.desktop_action('hotkey',keys=['CTRL','A'],frame_id='upper')
-    ui.hotkey.assert_called_once_with('ctrl','a')
+    if os.name=='nt':
+        native.assert_called_once_with([17,65]);ui.failSafeCheck.assert_called_once()
+        ui.hotkey.assert_not_called()
+    else:ui.hotkey.assert_called_once_with('ctrl','a')
     assert control._desktop_frame is None
     from jan_mcp_commander.errors import public_error
     control._desktop_frame=('bad',time.monotonic(),(1920,1080),None)
     with pytest.raises(ValueError) as denied:
         control.desktop_action('hotkey',keys=['UNKNOWN_KEY'],frame_id='bad')
     assert public_error(denied.value)['error_code']=='DESKTOP_KEYS_INVALID'
-    assert ui.hotkey.call_count==1
+    assert native.call_count+ui.hotkey.call_count==1
     with pytest.raises(ValueError):control.desktop_action('type',text='hello\ncommand')
     if os.name=='nt':
         with pytest.raises(ValueError,match='1024'):control.desktop_action('type',text='A'*1025)

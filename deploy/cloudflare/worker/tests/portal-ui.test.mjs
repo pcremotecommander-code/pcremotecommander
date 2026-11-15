@@ -203,7 +203,7 @@ test('public setup keeps commands first, then assistant setup, verification and 
   for(const os of ['linux','macos']) {
     const other=await (await f.call('/devices/connect?step=copy&os='+os)).text();
     assert.match(other,/Quick setup/);
-    assert.ok(other.includes('install-posix-beta43.sh | bash'));
+    assert.ok(other.includes('install-posix-beta44.sh | bash'));
     assert.ok(other.includes('data-copy-target="'+os+'-doctor-command"'));
     assert.match(other,/<div id="setup-windows" hidden>/);
     assert.ok(other.includes('<div id="setup-'+os+'"><h2 class="setup-platform-title">'));

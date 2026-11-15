@@ -2,7 +2,7 @@
 
 Run `npx --yes pcremotecommander@beta setup` to install or reconnect. Beta.33 supports Windows x64 and Linux/macOS x64 or ARM64. Windows includes Python. Linux/macOS prepare a checksum-pinned user-scoped Python runtime if Python 3.11+ with venv is missing. Clean native Linux/macOS acceptance is still pending.
 
-Without Node.js, Linux/macOS users can start with `curl -fsSL https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta43.sh | bash`. It prepares pinned user-scoped Node.js and Python if needed, verifies the versioned source download and opens computer approval. Standard Linux/macOS setup enables files, commands and browser. Desktop control needs additional OS permissions; Linux requires X11.
+Without Node.js, Linux/macOS users can start with `curl -fsSL https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta44.sh | bash`. It prepares pinned user-scoped Node.js and Python if needed, verifies the versioned source download and opens computer approval. Standard Linux/macOS setup enables files, commands and browser. Desktop control needs additional OS permissions; Linux requires X11.
 
 The launcher verifies downloads before execution and caches them under your user profile. Reuse the same setup command each day and keep its terminal open. `npx --yes pcremotecommander@beta doctor` checks runtime, saved pairing, local-agent health and public reachability. Use dashboard **Check connection** for selected-device relay discovery. A CLI public-health pass alone is not an authenticated assistant test.
 
