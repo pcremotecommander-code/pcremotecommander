@@ -23,7 +23,7 @@ If the short command does not work:
 powershell -NoProfile -Command "irm https://pc-remote-commander.pcremotecommander.workers.dev/install.ps1 | iex"
 ```
 
-After first installation, open a new terminal before using the short command again. On the dashboard, choose **Next: Connect AI** to see the assistant instructions, then **Next: Verify** and **Go to dashboard**. Compare both codes when the approval page opens; never share pairing links publicly.
+After first installation, open a new terminal before using the short command again. On the dashboard, finish **Verify** before opening **Connect AI** for your assistant instructions. Compare both codes when the approval page opens; never share pairing links publicly.
 
 ## 2. Use this remote MCP endpoint
 
@@ -73,7 +73,7 @@ For a desktop client launching a local process instead of the hosted endpoint, f
 
 The same setup command includes the CLI and workflow skills. No per-tool installation is needed. See the optional [CLI/skills reference](skills.md) when you want to invoke a local action directly; those commands do not start the remote agent.
 
-The public npm beta supports Windows. A public Linux installer and clean Linux client test are pending.
+Windows is the primary beta setup. Linux and macOS beta installers are available in the dashboard. Fresh native acceptance for those platforms is pending.
 
 ## First useful test
 

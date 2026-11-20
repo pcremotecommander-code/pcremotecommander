@@ -1,89 +1,108 @@
-# PC Remote Commander · PCRC
+<p align="center">
+  <img src="https://pc-remote-commander.pcremotecommander.workers.dev/brand/pcrc-logo.png" width="96" alt="PC Remote Commander logo">
+</p>
 
-**Use a compatible AI assistant with your own Windows PC.** PCRC connects the assistant to approved files, commands, a controlled browser and desktop actions, with device access managed in one dashboard.
+<h1 align="center">PC Remote Commander (PCRC)</h1>
 
-[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Step-by-step setup](docs/install.md) · [npm](https://www.npmjs.com/package/pcremotecommander)
+<p align="center"><strong>Connect your AI to your computer. Control, automate, and get things done.</strong></p>
 
-Windows beta. Bring your own compatible AI client and any plan it requires. PCRC does not include an AI model subscription and is not an approved ChatGPT or Claude directory listing.
+PCRC lets a compatible AI assistant work with files, commands, an isolated browser, and desktop apps on a computer you approve. Use it to check a local project, update a document, or run a test without copying every result back into chat.
 
-## Why use PCRC instead of only a coding agent?
+[![GitHub prerelease](https://img.shields.io/github/v/release/pcremotecommander-code/pcremotecommander?include_prereleases&label=GitHub%20release)](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.45)
+[![npm beta](https://img.shields.io/npm/v/pcremotecommander/beta?label=npm%20beta)](https://www.npmjs.com/package/pcremotecommander)
+[![npm weekly downloads](https://img.shields.io/npm/dw/pcremotecommander)](https://www.npmjs.com/package/pcremotecommander)
+[![Source checks on next](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml/badge.svg?branch=next)](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml?query=branch%3Anext)
+[![GitHub issues](https://img.shields.io/github/issues/pcremotecommander-code/pcremotecommander)](https://github.com/pcremotecommander-code/pcremotecommander/issues)
 
-Choose PCRC when the missing piece is **access to the computer you need to work on**, rather than another AI model.
+[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Setup](#quick-start) · [Tools](#available-tools) · [Troubleshooting](#troubleshooting) · [Beta.45 release notes](docs/beta45-keyboard-release.md)
 
-- **Use the chat client you prefer.** Connect a compatible ChatGPT, Claude or Cursor client to your paired PC. Ask it to inspect a local test failure, update an approved document or work with a supported interface without manually transferring each result into chat.
-- **Choose the computer centrally.** Pair computers to your account, select which online device receives new requests, inspect usage and revoke its access from the dashboard. Keep the selected PC's agent running.
-- **Combine files, terminal and visual tasks.** For example, inspect a project configuration, run an approved check, then inspect its browser output. Capabilities and confirmations still apply to every operation.
-- **Build with two or three AI assistants.** Let one assistant implement a feature, another write tests, and a third review the result. Connect each compatible client and divide work with PCRC task assignments. Up to three active assignments can reserve separate file areas; participating tools reject conflicting writes and stale hashes. You manage assignments and handoffs—PCRC does not automatically launch models, merge every change or lock out unrelated programs/manual edits.
-- **Recover supported file changes.** Reviewed text-edit/delete operations create recovery backups. Inspect a preview and current hash before changing important data; keep your own backups too.
+> **[New in 0.7.0-beta.45](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.45)** · Windows typing supports printable Unicode. Shortcuts use scan codes where supported, and keyboard actions check the focused control. Receipts distinguish sending keys from verifying what happened in the app. The published Windows build passed an exact save-and-reopen test with accents and emoji. [See what changed in all 80 tools](docs/beta45-keyboard-release.md#tool-by-tool-reference).
 
-### A practical comparison
+## Quick start
 
-| Your situation | Best starting point | Reason |
-| --- | --- | --- |
-| You want to build, debug and test with your preferred AI | PCRC with a compatible assistant | Connect Codex and Claude Code to the same PCRC MCP server using your account. Give each assistant a separate task: one implements a feature while the other writes tests or reviews it. Use PCRC task assignments to coordinate handoffs and block conflicting writes among participating tools. |
-| You want a preferred MCP chat client to act on an account-paired PC | PCRC remote MCP | PCRC supplies the computer-access layer, selected-device routing and revocation; your AI client supplies the reasoning. |
-| You know the exact local operation and want a command interface | PCRC CLI | Invoke a supported local operation or get workflow guidance without treating the CLI as an autonomous assistant. |
-| You use multiple assistants on the same workspace | PCRC task assignments | Explicit reservations and handoffs reduce collisions among cooperating tools; uncertain results require review rather than automatic replay. |
+1. On the Windows PC you want to connect, [download Start-PCRC.cmd](https://pc-remote-commander.pcremotecommander.workers.dev/install/Start-PCRC.cmd) and double-click it. If you already have Node.js 20+ and npm, run:
 
-There is overlap. Codex and Claude Code also support integrations and broader workflows; PCRC does not claim exclusive computer use, remote access, superior reasoning, or fewer security requirements. It can complement a coding agent. Read the current [Codex CLI guide](https://learn.chatgpt.com/docs/codex/cli) and [Claude Code overview](https://code.claude.com/docs/en/overview).
+   ```cmd
+   npx --yes pcremotecommander@beta setup
+   ```
 
-## One command for setup and reconnect
+2. Sign in to PCRC. Compare the terminal and browser pairing codes, review the requested access, and approve the request you started. Select the computer for AI tools in the dashboard.
+3. Leave the terminal open at **Ready to work**. [Connect your assistant](#connect-an-ai-assistant) using the same PCRC account.
+4. Ask your assistant: “Use PCRC to check the connected computer and its capabilities.” Try reading a disposable test file before approving a write.
+5. To disconnect the device, press **Ctrl+C** in the PCRC terminal. Run the same launcher to reconnect. Use **Revoke** in the dashboard when you want to remove its pairing.
 
-Run in PowerShell, Command Prompt or Windows Terminal:
+The first run downloads a checksum-verified runtime under your account. Later runs reuse the installed version. See the [full setup guide](docs/install.md) for alternatives and detailed pairing instructions.
 
-```powershell
-npx --yes pcremotecommander@beta setup
-```
+## Connect an AI assistant
 
-Prefer a double-click launcher? [Download Start-PCRC.cmd](https://pc-remote-commander.pcremotecommander.workers.dev/install/Start-PCRC.cmd), save it to your desktop and double-click it. First use prepares missing Node.js and the bundled runtime. Use that same file for daily reconnects and keep its terminal open. This small launcher requires internet.
-
-
-If `npx` is missing or that command does not work, this fallback prepares verified portable Node.js and continues setup:
-
-```powershell
-powershell -NoProfile -Command "irm https://pc-remote-commander.pcremotecommander.workers.dev/install.ps1 | iex"
-```
-
-Python is bundled. First download can take several minutes; later launches reuse the runtime. Open a new terminal after first installation before using the short command next time.
-
-Sign in with **your own GitHub account**, compare the terminal and website codes, review computer-control permissions and approve only your own request. Leave **Use this computer for AI tools** checked. Keep the terminal running; **Ctrl+C** disconnects.
-
-## How it fits together
-
-```mermaid
-flowchart LR
-  A[Your compatible AI client] -->|HTTPS and account OAuth| B[PCRC gateway]
-  C[Your Windows agent] <-->|Signed device connection over WSS| B
-  C --> D[Approved file tools]
-  C --> E[Commands and supported UI actions]
-  F[Your dashboard] -->|Pair, select, revoke| B
-  G[PCRC local CLI] --> C
-```
-
-The remote account reaches its own approved, selected computer. The gateway routes requests; the local service checks permissions. CLI use is local and does not itself start the remote agent. This is an access service, not a model hosting service.
-
-## Connect ChatGPT, Claude or Cursor
-
-Remote MCP endpoint — choose **OAuth**:
+Use the remote MCP endpoint and OAuth:
 
 ```text
 https://pc-remote-commander.pcremotecommander.workers.dev/mcp
 ```
 
-The dashboard's **Copy command → Connect AI → Verify → Dashboard** flow shows where to paste this URL. Follow the [client setup guide](docs/install.md), use the same PCRC account for pairing and client consent, and check connection status before a write. Control requires `pcrc:read pcrc:control` and the device's approved local capabilities. Client subscriptions and workspace restrictions apply separately.
+| Client | Where to connect |
+| --- | --- |
+| ChatGPT | Add a custom MCP server in Apps or Connectors, then enable the connection in your chat. [ChatGPT setup](docs/install.md#chatgpt) |
+| Claude | Open **Connectors → Add custom connector**, enter the endpoint, and enable it in a conversation. [Claude setup](docs/install.md#claude-web-or-claude-desktop--remote-connector) |
+| Cursor | Add the endpoint to your MCP settings and authorize it before enabling it for Agent. [Cursor setup](docs/install.md#cursor--remote-mcp) |
 
-MCP, CLI and advisory workflow skills are installed together. No separate command is needed for each tool. Skills suggest steps; they do not grant permissions. [CLI and skills reference](docs/skills.md).
+Your client plan and workspace must allow custom remote MCP connections. Menu labels can vary. These are configuration guides. Check your device and capabilities in the client you intend to use. PCRC supplies computer access, while your AI assistant supplies the model. PCRC is distributed as a custom connector.
 
-## Beta terms at a glance
+## Available tools
 
-- Use only computers and data you own or are authorized to access. Review actions before approving.
-- Full control uses your Windows account privileges. Commands may reach outside the file workspace; screenshots may contain private information.
-- Tool results pass through the service and your AI provider. HTTPS/WSS is not content end-to-end encryption hiding data from them.
-- Back up important data. Beta features can fail or change; there is no uptime guarantee.
-- Free includes 15,000 tool calls per UTC month. See the website for current plans, localized checkout totals and applicable taxes. An enabled checkout is not proof that every payment/refund path has completed acceptance testing.
+| What you want to do | Examples |
+| --- | --- |
+| Find or edit files | Search one project, read matching files, preview a change, and verify it after saving. |
+| Work with documents and media | Inspect a spreadsheet, create or reorder a PDF, resize a test image, or transcribe a short clip with the optional offline model. |
+| Run commands and manage processes | Ask for a Python version check, run a project test, read its output, or stop a process PCRC started. |
+| Set up a Python project | Review a plan for a separate environment. Packages are installed per environment. |
+| Use an isolated browser | Open a test page, inspect it, and record or replay a reviewed workflow. |
+| Use the desktop | Inspect accessible controls or review a fresh screenshot before clicking, typing, or sending a shortcut. |
+| Coordinate assistants | Assign separate file areas and hand off work. Participating tools reject conflicting writes. |
+| Manage access | Check the selected computer and connection capability, review approvals, or revoke a device in the dashboard. |
 
-[Terms](https://pc-remote-commander.pcremotecommander.workers.dev/terms/) · [Privacy](https://pc-remote-commander.pcremotecommander.workers.dev/privacy/) · [Refund policy](https://pc-remote-commander.pcremotecommander.workers.dev/refunds/) · [Security notes](docs/security.md)
+[80-tool catalog and beta.45 changes](docs/beta45-keyboard-release.md#tool-by-tool-reference) · [Local CLI and workflow skills](docs/skills.md)
 
-The public npm beta supports Windows. A verified public Linux/macOS installer, universal multimedia editing and public directory approval are not claimed. UTCP is a separate development-only prototype and is not enabled for public use.
+## How it works
 
-This public repository contains guides and the small launcher, not hosted gateway or device-runtime source. Do not post credentials, pairing links, private configuration or user data in issues. Support: [janagiri3297@gmail.com](mailto:janagiri3297@gmail.com).
+```mermaid
+flowchart LR
+  A["Compatible AI client"] -->|"OAuth and MCP over HTTPS"| G["PCRC gateway"]
+  D["Account and device dashboard"] -->|"Pair, select, revoke"| G
+  G <-->|"Authenticated device relay"| P["Paired computer agent"]
+  P --> F["Workspace files and documents"]
+  P --> T["Commands and processes"]
+  P --> B["Browser and desktop"]
+```
+
+The gateway routes an authorized request to your selected computer. The local agent checks permissions and runs supported operations. Your assistant receives the result so it can help you verify what happened.
+
+## Security and compatibility
+
+- Compare both pairing codes. Approve capabilities and actions you expect. Revoke access in the dashboard when you no longer need it.
+- Commands run with your operating-system account's privileges and can reach beyond the file workspace. Screenshots and tool results can contain private information and pass through the service and your AI provider. HTTPS and WSS protect transport.
+- Windows 10/11 is the primary beta setup. The `npx` launcher needs Node.js 20+ and npm. `Start-PCRC.cmd` can prepare missing prerequisites. Hosted use requires internet and the agent terminal to stay open.
+- Linux and macOS beta installers are available from the dashboard. Artifact checksums were verified. Fresh native acceptance across those platforms is pending. Desktop support depends on OS permissions and the session type.
+- The default branch contains guides and launcher information. The [source and test branch](https://github.com/pcremotecommander-code/pcremotecommander/tree/next) contains the runtime development baseline. The hosted service operates separately.
+
+[Security notes](docs/security.md) · [Privacy](https://pc-remote-commander.pcremotecommander.workers.dev/privacy/) · [Terms](https://pc-remote-commander.pcremotecommander.workers.dev/terms/) · [Refund policy](https://pc-remote-commander.pcremotecommander.workers.dev/refunds/)
+
+## Troubleshooting
+
+| What you see | What to check |
+| --- | --- |
+| Device offline | Start PCRC on the intended computer and confirm it is selected in the dashboard. Keep the terminal open. |
+| `UNAUTHORIZED` | Reauthorize the PCRC connector in your AI app using the account that owns the device. Keep the PC launcher running. |
+| `Unknown tool` | Refresh tool discovery in your client or check in a fresh chat. If it persists, report the tool name, agent version, and error. |
+| Command or edit denied | Check the device capability, client OAuth scope, approval, workspace path, or task reservation. Inspect current state before retrying an uncertain action. |
+| Typing reports dispatch only | Check a fresh screenshot or accessible control before proceeding. Some apps handle simulated input differently. |
+| Usage or quota limit | Open the dashboard to check usage and the website for current plan limits. PCRC offers a free plan. AI client subscriptions are separate. |
+
+## Roadmap and support
+
+- **Available now:** Windows beta pairing and remote tools, workspace safeguards, and reviewed task handoffs.
+- **In development:** simpler connection recovery and broader published tool and platform testing.
+- **Planned:** explore hybrid multi-cloud architecture. The current diagram shows the deployed flow.
+
+Report bugs or suggest features in [GitHub Issues](https://github.com/pcremotecommander-code/pcremotecommander/issues). Include your version, platform, and steps using synthetic examples. Keep credentials, authorization links, and private content out of public reports. For security concerns, follow the [security reporting guide](docs/security.md). You can also reach [PCRC support](mailto:pcremotecommander@gmail.com).
