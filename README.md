@@ -14,7 +14,7 @@ PCRC lets a compatible AI assistant work with files, commands, an isolated brows
 [![Source checks on next](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml/badge.svg?branch=next)](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml?query=branch%3Anext)
 [![GitHub issues](https://img.shields.io/github/issues/pcremotecommander-code/pcremotecommander)](https://github.com/pcremotecommander-code/pcremotecommander/issues)
 
-[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Setup](#quick-start) · [Tools](#available-tools) · [Troubleshooting](#troubleshooting) · [Beta.45 release notes](docs/beta45-keyboard-release.md)
+[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Setup](#quick-start) · [Tools](#available-tools) · [Troubleshooting](#troubleshooting) · [Support PCRC](#support-pcrc--buy-me-a-coffee) · [Beta.45 release notes](docs/beta45-keyboard-release.md)
 
 > **[New in 0.7.0-beta.45](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.45)** · Windows typing supports printable Unicode. Shortcuts use scan codes where supported, and keyboard actions check the focused control. Receipts distinguish sending keys from verifying what happened in the app. The published Windows build passed an exact save-and-reopen test with accents and emoji. [See what changed in all 80 tools](docs/beta45-keyboard-release.md#tool-by-tool-reference).
 
@@ -106,3 +106,16 @@ The gateway routes an authorized request to your selected computer. The local ag
 - **Planned:** explore hybrid multi-cloud architecture. The current diagram shows the deployed flow.
 
 Report bugs or suggest features in [GitHub Issues](https://github.com/pcremotecommander-code/pcremotecommander/issues). Include your version, platform, and steps using synthetic examples. Keep credentials, authorization links, and private content out of public reports. For security concerns, follow the [security reporting guide](docs/security.md). You can also reach [PCRC support](mailto:pcremotecommander@gmail.com).
+
+## Support PCRC — Buy Me a Coffee
+
+Hi, I'm the solo developer behind PCRC. I build and maintain it independently, and I appreciate everyone who uses it, reports a bug, or shares an idea.
+
+If you'd like to contribute, any amount you choose helps, even $1. Contributions help cover:
+
+- 🌐 Infrastructure and hosting expenses
+- 🛠️ Development and testing tools
+- 🐛 Bug fixes and reliability improvements
+- 🌱 Future PCRC development
+
+Donations are completely optional. You can use PCRC's free personal and local features without donating. Thanks for being part of the PCRC community.
