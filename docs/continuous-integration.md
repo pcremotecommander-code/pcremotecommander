@@ -1,12 +1,12 @@
 # Source verification
 
-The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch where the workflow is present. Both runners check source credentials, gateway types and tests, launchers, and the MCP bridge and catalog. Ubuntu runs the full Linux source suite with headless Chromium. Hosted Windows runs a named subset of Python tests, including native keyboard ABI tests, UI Automation contracts, mocked scanner behavior, privacy, and command environments.
+The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch where the workflow is present. Both runners check source credentials, gateway types, launchers, and the MCP bridge and catalog. Ubuntu runs the gateway integration suite and the full Linux source suite with headless Chromium. Hosted Windows runs a named subset of Python tests, including native keyboard ABI tests, UI Automation contracts, mocked scanner behavior, privacy, and command environments.
 
 The workflow has read-only repository permission, checks out without persisted credentials, and pins official GitHub actions to full commit IDs. It contains no production secrets, deployment, npm publication, email delivery or financial actions. It does not change branch protection or promote `next` to `main`.
 
 The Linux runner is Ubuntu 22.04: newer hosted Ubuntu images restrict Chromium's unprivileged user namespaces. PCRC continues to require Chromium sandboxing; CI does not add a `--no-sandbox` workaround or change the runner's security policy.
 
-Hosted Windows tests use the Windows 2022 image. The workflow does not change antivirus settings. The hosted Windows suite does not exercise real Defender scanning and the full Windows MCP integration suite.
+Hosted Windows tests use the Windows 2022 image. The workflow does not change antivirus settings. The hosted Windows suite leaves real Defender scanning and the full Windows MCP integration suite to the separate acceptance gate.
 
 Before release sign-off, run Windows acceptance on a dedicated, isolated Windows environment with Defender enabled and no production or personal credentials. Use a reviewed checkout and a normal user shell. With Python 3.14 and Node.js 24 available, install the test dependencies, then run the acceptance gate:
 

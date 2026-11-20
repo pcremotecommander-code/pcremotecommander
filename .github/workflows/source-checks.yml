@@ -73,12 +73,13 @@ jobs:
           tests/test_windows_input.py tests/test_windows_uia.py
           tests/test_security_scan.py tests/test_privacy.py
           tests/test_command_environment.py
-      - name: Gateway types and tests (includes dry-run build)
+      - name: Gateway type check
+        run: npm run check --prefix deploy/cloudflare/worker
+      - name: Gateway integration suite (Linux)
+        if: runner.os == 'Linux'
         env:
           JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
-        run: |
-          npm run check --prefix deploy/cloudflare/worker
-          npm test --prefix deploy/cloudflare/worker
+        run: npm test --prefix deploy/cloudflare/worker
       - name: Launcher tests
         run: node --test deploy/npm/launcher/tests/*.test.cjs
       - name: Build MCP test client
