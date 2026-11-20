@@ -119,3 +119,7 @@ If you'd like to contribute, any amount you choose helps, even $1. Contributions
 - 🌱 Future PCRC development
 
 Donations are completely optional. You can use PCRC's free personal and local features without donating. Thanks for being part of the PCRC community.
+
+<a href="https://buymeacoffee.com/pcremotecommander">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="217" alt="Support PCRC on Buy Me a Coffee">
+</a>
