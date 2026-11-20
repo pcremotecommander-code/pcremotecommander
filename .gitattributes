@@ -1,2 +1,5 @@
 # Preserve upstream vendor license headers byte-for-byte.
 **/vendor/** whitespace=-trailing-space,-blank-at-eof
+
+# The launcher verifies this published artwork by its exact SHA-256.
+PCRC-retro-wide.cmd -text
