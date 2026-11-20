@@ -1,16 +1,23 @@
 # Source verification
 
-The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch. Linux and Windows runners install the pinned project dependencies, scan Git-visible source for private-state paths and common credential formats, run Python tests, check gateway types and tests, and test the public launcher. Python browser fixtures use headless Playwright Chromium. Windows additionally runs the full MCP integration suite against synthetic fixtures; Linux runs MCP bridge and catalog unit tests because the media/document release preflight requires Windows AMSI/Defender. Windows-specific packager, scanner and UIA tests are explicitly skipped on other systems, not counted as passes.
+The `Source checks` workflow runs on pushes and pull requests to `main` and `next`, and on manual dispatch where the workflow is present. Both runners check source credentials, gateway types and tests, launchers, and the MCP bridge and catalog. Ubuntu runs the full Linux source suite with headless Chromium. Hosted Windows runs a named subset of Python tests, including native keyboard ABI tests, UI Automation contracts, mocked scanner behavior, privacy, and command environments.
 
 The workflow has read-only repository permission, checks out without persisted credentials, and pins official GitHub actions to full commit IDs. It contains no production secrets, deployment, npm publication, email delivery or financial actions. It does not change branch protection or promote `next` to `main`.
 
 The Linux runner is Ubuntu 22.04: newer hosted Ubuntu images restrict Chromium's unprivileged user namespaces. PCRC continues to require Chromium sandboxing; CI does not add a `--no-sandbox` workaround or change the runner's security policy.
 
-Windows installs Chromium without Playwright's optional Windows Server media-feature installation; the synthetic browser fixtures do not play video. Native media workers are tested using the pinned PyAV and NumPy development dependencies.
+Hosted Windows tests use the Windows 2022 image. The workflow does not change antivirus settings. The hosted Windows suite does not exercise real Defender scanning and the full Windows MCP integration suite.
 
-Windows uses the supported Windows 2022 hosted image. A hosted image that cannot enable real-time protection is not a valid native-acceptance environment; its job remains failed instead of skipping the scanner prerequisite.
+Before release sign-off, run Windows acceptance on a dedicated, isolated Windows environment with Defender enabled and no production or personal credentials. Use a reviewed checkout and a normal user shell. With Python 3.14 and Node.js 24 available, install the test dependencies, then run the acceptance gate:
 
-The disposable Windows runner enables Defender real-time protection and verifies it before native tests, then warms the same restricted PowerShell environment used by PCRC. It fails if the runner cannot provide protection; it never disables tamper protection or bypasses PCRC scanning. These runner-only steps do not configure a paired computer or production. See [Microsoft's real-time protection configuration](https://learn.microsoft.com/en-us/defender-endpoint/configure-real-time-protection-microsoft-defender-antivirus).
+```powershell
+python -m pip install -e ".[dev,browser]"
+python -m playwright install chromium
+npm ci --prefix deploy/mcp-task-server
+powershell -NoProfile -File scripts/check_windows_acceptance.ps1
+```
+
+The script checks real-time protection, exercises PCRC's real scanner on synthetic bytes, and runs the Windows source and MCP integration suites. Any failure returns a nonzero exit. Record the tested commit and results separately from hosted CI. Keep this environment off public pull-request jobs. See [Microsoft's real-time protection configuration](https://learn.microsoft.com/en-us/defender-endpoint/configure-real-time-protection-microsoft-defender-antivirus).
 
 `PCRC_SOURCE_ONLY_TESTS=1` labels unavailable private recordings and release-binary checks as skipped. Native desktop, media, packaged-release and live public acceptance checks retain their existing opt-in prerequisites. A green source workflow does not certify all exposed tools, account isolation in production, installed release signatures, or long-running relay stability. Read the test summaries and skips before release.
 
