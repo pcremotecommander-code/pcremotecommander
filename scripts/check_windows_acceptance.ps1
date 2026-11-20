@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $env:PCRC_SOURCE_ONLY_TESTS = '1'
 $env:JAN_MCP_BROWSER_CHANNEL = 'chromium'
-$env:JAN_TEST_PYTHON = (Get-Command python -CommandType Application).Source
+$env:JAN_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
 
 $defender = Get-MpComputerStatus
 if (-not ($defender.AMServiceEnabled -and $defender.AntivirusEnabled -and $defender.RealTimeProtectionEnabled)) {
