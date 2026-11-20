@@ -853,9 +853,11 @@ class ControlCommander(PortableCommander):
         if type(x) is not int or type(y) is not int or type(amount) is not int or not -20 <= amount <= 20:
             raise PermissionDenied('Invalid desktop coordinates or scroll amount')
         text_limit=1024 if os.name=='nt' else 4096
-        if not isinstance(text, str) or len(text) > text_limit or not text.isascii() or any(ord(c)<32 or ord(c)==127 for c in text):
-            if text:
-                raise PermissionDenied(f'Desktop typing accepts printable ASCII, up to {text_limit} characters per step')
+        if (not isinstance(text, str) or len(text) + (sum(ord(char) > 0xffff for char in text) if os.name == 'nt' else 0) > text_limit or
+                (text and (not text.isprintable() or (os.name != 'nt' and not text.isascii())))):
+            raise PermissionDenied(f'Desktop typing accepts printable text (ASCII on non-Windows), up to {text_limit} characters per step')
+        if action == 'type' and not text:
+            raise PermissionDenied('Desktop typing requires nonempty text')
         if keys is not None and (not isinstance(keys, list) or len(keys) > 4 or (action == 'hotkey' and not keys) or any(not isinstance(k, str) for k in keys)):
             raise PermissionDenied('Use one to four named keys')
         if keys is not None:
@@ -875,11 +877,15 @@ class ControlCommander(PortableCommander):
                 raise PermissionDenied('Drag endpoint must be inside the primary screen')
             if action == 'screenshot':
                 foreground = self._foreground_window()
+                focus = None
+                if os.name == 'nt':
+                    from .windows_input import focused_window
+                    focus = focused_window()
                 result = {**jpeg(ui.screenshot()),'method':'screenshot'}
-                if foreground != self._foreground_window():
+                if foreground != self._foreground_window() or (os.name == 'nt' and focus != focused_window()):
                     raise PermissionDenied('Foreground changed during frame capture')
                 identifier = uuid.uuid4().hex
-                self._desktop_frame = (identifier, time.monotonic(), (width,height), foreground)
+                self._desktop_frame = (identifier, time.monotonic(), (width,height), foreground, focus)
                 result.update(frame_id=identifier, frame_expires_seconds=30, foreground_window=foreground,
                               input_requires='Fresh one-use frame and unchanged foreground; verify the intended application visually')
                 return result
@@ -900,22 +906,29 @@ class ControlCommander(PortableCommander):
                 ui.scroll(amount * 120 if os.name == 'nt' else amount)
             elif action == 'type':
                 if os.name=='nt':
-                    from .windows_input import write_text
+                    from .windows_input import focused_window, write_text
                     for offset in range(0,len(text),32):
                         ui.failSafeCheck()
                         self._check('desktop')
-                        if frame[3]!=self._foreground_window():
-                            raise PermissionDenied('Desktop text input incomplete; foreground changed. Inspect actual text; do not replay automatically.')
+                        if frame[3]!=self._foreground_window() or not frame[4] or focused_window()!=frame[4]:
+                            raise PermissionDenied('Desktop text input incomplete; keyboard focus changed. Inspect actual text; do not replay automatically.')
                         write_text(text[offset:offset+32])
+                    if frame[3]!=self._foreground_window() or not frame[4] or focused_window()!=frame[4]:
+                        raise PermissionDenied('Desktop text input incomplete; keyboard focus changed. Inspect actual text; do not replay automatically.')
                 else:ui.write(text, interval=0.001)
             elif action == 'hotkey':
                 if not keys or any(k not in ui.KEYBOARD_KEYS for k in keys):
                     raise PermissionDenied('Invalid key combination')
                 if os.name=='nt':
-                    from .windows_input import press_hotkey
+                    from .windows_input import focused_window, press_hotkey
                     ui.failSafeCheck()
+                    if frame[3]!=self._foreground_window() or not frame[4] or focused_window()!=frame[4]:
+                        raise PermissionDenied('Desktop frame missing, stale, consumed or foreground changed')
                     press_hotkey([ui.platformModule.keyboardMapping.get(key) for key in keys])
                 else:ui.hotkey(*keys)
+            if action in {'type', 'hotkey'}:
+                return {'dispatched': action, 'application_verified': False,
+                        'next_step': 'Inspect the application before claiming success or sending more input.'}
             return {'performed': action, 'screen_width': width, 'screen_height': height}
 
     def close_control(self):
@@ -1222,7 +1235,7 @@ def register_control_tools(server, commander):
     @directory_tool(server, annotations=control)
     @tool_errors(commander)
     def jan_desktop(action: str, x: int = 0, y: int = 0, text: str = '', keys: list[str] | None = None, amount: int = 0, end_x: int = 0, end_y: int = 0, frame_id: str = ''):
-        """Control primary desktop: screenshot, click, right_click, double_click, drag(to end_x/end_y), move, scroll(amount), type(printable ASCII; Windows max 1024 per step, other systems 4096), hotkey(keys). Use native screen coordinates from screenshot metadata. Windows/Linux X11; Wayland unsupported. Whole screen is shared. Input requires frame_id from a fresh screenshot (one use, 30s, unchanged Windows foreground). Verify target visually. Move pointer to a corner for failsafe."""
+        """Control primary desktop: screenshot, click, right_click, double_click, drag(to end_x/end_y), move, scroll(amount), type(printable Unicode on Windows, ASCII on other systems). Keyboard dispatch requires app readback, hotkey(keys). Use native screen coordinates from screenshot metadata. Windows/Linux X11; Wayland unsupported. Whole screen is shared. Input requires frame_id from a fresh screenshot (one use, 30s, unchanged Windows foreground). Verify target visually. Move pointer to a corner for failsafe."""
         result = commander.desktop_action(action, x, y, text, keys, amount, end_x, end_y, frame_id)
         if result.get('mime_type'):
             return CallToolResult(content=[TextContent(type='text',text=json.dumps({k:v for k,v in result.items() if k!='data'})),

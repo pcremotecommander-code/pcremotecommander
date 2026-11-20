@@ -77,7 +77,7 @@ fi
 if ! command -v npm >/dev/null || ! command -v node >/dev/null || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 20 ? 1 : 0)'; then
   export PCRC_BOOTSTRAP_NODE=1
 fi
-exec "$pcrc_python" -I - '0.7.0-beta.44' '676bd168f0d612115a54fd47990555775814926dff513c5420b4e14754685047' "$@" <<'PY'
+exec "$pcrc_python" -I - '0.7.0-beta.45' '2729324e8405b8cb4f4381f8a8807d2e7dacd064ec14262ab12b5fddd371696c' "$@" <<'PY'
 import fcntl
 import hashlib
 import io

@@ -159,6 +159,7 @@ def test_desktop_adapter_bounds_failsafe_and_typing(control,monkeypatch):
     ui=SimpleNamespace(size=lambda:(1920,1080),click=Mock(),write=Mock(),hotkey=Mock(),failSafeCheck=Mock(),KEYBOARD_KEYS=['ctrl','a'],platformModule=SimpleNamespace(keyboardMapping={'ctrl':17,'a':65}))
     native=Mock()
     monkeypatch.setattr('jan_mcp_commander.windows_input.press_hotkey',native)
+    monkeypatch.setattr('jan_mcp_commander.windows_input.focused_window',lambda: 1)
     monkeypatch.setitem(sys.modules,'pyautogui',ui)
     with pytest.raises(ValueError,match='inside'): control.desktop_action('click',x=1920)
     monkeypatch.setattr(control,'_foreground_window',lambda:None)
@@ -168,8 +169,10 @@ def test_desktop_adapter_bounds_failsafe_and_typing(control,monkeypatch):
     assert ui.FAILSAFE
     with pytest.raises(ValueError):control.desktop_action('hotkey',keys=['bad'])
     with pytest.raises(ValueError):control.desktop_action('hotkey',keys=[])
-    control._desktop_frame=('upper',time.monotonic(),(1920,1080),None)
-    control.desktop_action('hotkey',keys=['CTRL','A'],frame_id='upper')
+    control._desktop_frame=('upper',time.monotonic(),(1920,1080),None,1)
+    receipt=control.desktop_action('hotkey',keys=['CTRL','A'],frame_id='upper')
+    assert receipt['dispatched']=='hotkey' and receipt['application_verified'] is False
+    assert 'performed' not in receipt
     if os.name=='nt':
         native.assert_called_once_with([17,65]);ui.failSafeCheck.assert_called_once()
         ui.hotkey.assert_not_called()
@@ -198,11 +201,12 @@ def test_windows_typing_keeps_failsafe_consumes_frame_and_stops_on_focus_change(
     import jan_mcp_commander.windows_input as windows_input
     ui=SimpleNamespace(size=lambda:(1920,1080),failSafeCheck=Mock(),write=Mock())
     monkeypatch.setitem(sys.modules,'pyautogui',ui)
-    foreground=['test-window'];sent=[]
-    monkeypatch.setattr(control,'_foreground_window',lambda:foreground[0])
-    def send(text):sent.append(text);foreground[0]='another-window'
+    focus=[1];sent=[]
+    monkeypatch.setattr(control,'_foreground_window',lambda:'test-window')
+    def send(text):sent.append(text);focus[0]=2
+    monkeypatch.setattr(windows_input,'focused_window',lambda:focus[0])
     monkeypatch.setattr(windows_input,'write_text',send)
-    control._desktop_frame=('fixture',time.monotonic(),(1920,1080),'test-window')
+    control._desktop_frame=('fixture',time.monotonic(),(1920,1080),'test-window',1)
     with pytest.raises(ValueError,match='input incomplete'):
         control.desktop_action('type',text='Abc '*16,frame_id='fixture')
     assert sent==['Abc '*8]

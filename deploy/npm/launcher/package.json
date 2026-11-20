@@ -1,6 +1,6 @@
 {
   "name": "pcremotecommander",
-  "version": "0.7.0-beta.44",
+  "version": "0.7.0-beta.45",
   "description": "PC Remote Commander beta launcher with checksum-pinned Windows and Linux/macOS setup",
   "license": "SEE LICENSE IN LICENSE.txt",
   "bin": {

@@ -48,6 +48,8 @@ def test_desktop_frames_consumed_expired_and_focus_changed(cmd,monkeypatch):
     frame=cmd.desktop_action('screenshot');monkeypatch.setattr(cmd,'_foreground_window',lambda:'different-window')
     with pytest.raises(ValueError,match='foreground'):cmd.desktop_action('click',x=10,y=20,frame_id=frame['frame_id'])
     monkeypatch.setattr(cmd,'_foreground_window',lambda:'owned-window')
-    frame=cmd.desktop_action('screenshot');identifier,_,size,focus=cmd._desktop_frame;cmd._desktop_frame=(identifier,time.monotonic()-31,size,focus)
+    frame=cmd.desktop_action('screenshot')
+    identifier,_,*target=cmd._desktop_frame
+    cmd._desktop_frame=(identifier,time.monotonic()-31,*target)
     with pytest.raises(ValueError):cmd.desktop_action('click',x=10,y=20,frame_id=frame['frame_id'])
     assert ui.click.call_count==1 and ui.FAILSAFE

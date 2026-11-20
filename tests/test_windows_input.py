@@ -15,6 +15,9 @@ def test_literal_input_preserves_case_without_shift_and_never_retries_partial(mo
     class Send:
         def __call__(self,count,events,size):
             calls.append(count)
+            if count==1:
+                assert events[0].payload.keyboard.flags==6
+                return 1
             assert size==(40 if ctypes.sizeof(ctypes.c_void_p)==8 else 28)
             assert [e.type for e in events]==[1]*count
             assert [e.payload.keyboard.scan for e in events]==[ord(text[len(calls)-1])]*2
@@ -26,7 +29,7 @@ def test_literal_input_preserves_case_without_shift_and_never_retries_partial(mo
         with pytest.raises(PermissionDenied) as error:write_text(text)
         assert public_error(error.value)['error_code']=='DESKTOP_INPUT_UNCERTAIN'
     else:write_text(text)
-    assert calls==[2]*(1 if partial else len(text))
+    assert calls==([2,1] if partial else [2]*len(text))
 
 
 @pytest.mark.skipif(os.name!='nt',reason='Windows INPUT ABI')
@@ -50,7 +53,7 @@ def test_navigation_chord_keeps_shift_held_and_marks_extended_end(monkeypatch,pa
     calls=[]
     class Send:
         def __call__(self,count,events,size):
-            calls.append([(e.payload.keyboard.vk,e.payload.keyboard.flags) for e in events])
+            calls.append([(e.payload.keyboard.scan,e.payload.keyboard.flags) for e in events])
             assert size==(40 if ctypes.sizeof(ctypes.c_void_p)==8 else 28)
             return 2 if partial and len(calls)==1 else count
     class Map:
@@ -61,8 +64,8 @@ def test_navigation_chord_keeps_shift_held_and_marks_extended_end(monkeypatch,pa
     if partial:
         with pytest.raises(PermissionDenied,match='incomplete'):module.press_hotkey([0x10,0x23])
     else:module.press_hotkey([0x10,0x23])
-    assert calls[0]==[(0x10,0),(0x23,1),(0x23,3),(0x10,2)]
-    if partial:assert calls[1]==[(0x23,3),(0x10,2)]
+    assert calls[0]==[(0x2A,8),(0x4F,9),(0x4F,11),(0x2A,10)]
+    if partial:assert calls[1]==[(0x4F,11),(0x2A,10)]
     else:assert len(calls)==1
 
 
@@ -73,3 +76,15 @@ def test_invalid_windows_chord_never_sends_input(monkeypatch,codes):
     def forbidden(*args,**kwargs):raise AssertionError('Input API must not be reached')
     monkeypatch.setattr(ctypes,'WinDLL',forbidden)
     with pytest.raises(PermissionDenied):module.press_hotkey(codes)
+
+
+@pytest.mark.skipif(os.name!='nt', reason='Windows INPUT ABI')
+def test_printable_non_bmp_character_uses_both_utf16_units(monkeypatch):
+    class Send:
+        def __call__(self, count, events, size):
+            assert [(e.payload.keyboard.scan, e.payload.keyboard.flags) for e in events] == [
+                (0xd83d, 4), (0xd83d, 6), (0xde42, 4), (0xde42, 6),
+            ]
+            return count
+    monkeypatch.setattr(ctypes, 'WinDLL', lambda *a, **kw: SimpleNamespace(SendInput=Send()))
+    write_text(chr(0x1f642))
