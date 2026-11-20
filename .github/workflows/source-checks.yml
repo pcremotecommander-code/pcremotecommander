@@ -60,6 +60,12 @@ jobs:
         env:
           JAN_MCP_BROWSER_CHANNEL: chromium
         run: python -m pytest -q -ra
+      - name: Warm Windows PowerShell for command tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          python -c "import os, subprocess; from jan_mcp_commander.environment import runtime_environment; subprocess.run([os.path.join(os.environ['SystemRoot'], 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), '-NoProfile', '-NonInteractive', '-Command', 'Write-Output PCRC_CI_POWERSHELL_READY'], env=runtime_environment(), check=True, timeout=90)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Python source tests (Windows, no native Defender dependency)
         if: runner.os == 'Windows'
         run: >-
