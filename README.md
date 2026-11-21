@@ -18,6 +18,8 @@ PCRC lets a compatible AI assistant work with files, commands, an isolated brows
 
 > **[New in 0.7.0-beta.46](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.46)** · The Cloudflare relay wakes less often while devices are idle, and the launcher skips duplicate startup checks. The device dashboard shows personal account activity, and the owner dashboard shows aggregate tool health. [Beta.45 keyboard and tool reference](docs/beta45-keyboard-release.md).
 
+> **Community update** · [An apology and an update on recent service interruptions](ANNOUNCEMENT.md).
+
 ## Quick start
 
 1. On the Windows PC you want to connect, [download Start-PCRC.cmd](https://pc-remote-commander.pcremotecommander.workers.dev/install/Start-PCRC-beta46.cmd) and double-click it. If you already have Node.js 20+ and npm, run:
