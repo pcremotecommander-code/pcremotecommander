@@ -109,9 +109,9 @@ def build_server(commander: PortableCommander) -> MCPServer:
 
     @directory_tool(server, annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     @tool_errors(commander)
-    def jan_skills() -> dict:
+    def jan_skills(skill: str | None = None) -> dict:
         """List advisory PCRC workflows; selection never runs tools or grants permissions."""
-        return commander.skill_catalog()
+        return commander.skill_catalog(skill)
 
     @directory_tool(server, annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     @tool_errors(commander)

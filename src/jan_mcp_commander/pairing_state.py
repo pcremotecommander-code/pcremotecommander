@@ -44,41 +44,57 @@ def write_credential(store, credential, *, overwrite):
     store.tree.write(FILE, blob, overwrite=overwrite)
 
 
-def inspect_state(workspace, port=None):
-    """Inspect existing encrypted state without creating keys or returning credentials."""
-    import hashlib
+def _existing_state_tree(workspace):
     from .core import state_directory
     from .safe_fs import SafeTree, check
     path = state_directory(workspace).expanduser().absolute()
     if path.is_relative_to(workspace):
         raise ValueError('Private state must remain outside the workspace')
-    value = {'paired': False, 'gateway': None, 'local_agent': False}
     if not path.exists():
-        return value
+        return None
     for parent in (path, *path.parents):
         check(parent.lstat(), directory=True)
     if os.name == 'posix' and (path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077):
         raise ValueError('Private state permissions denied')
-    tree = SafeTree(path, internal=True)
+    return SafeTree(path, internal=True)
+
+
+def load_enrolled_credential(workspace):
+    """Read signed enrollment from existing private state without modifying it."""
+    return _read_enrolled_credential(workspace, _existing_state_tree(workspace))
+
+
+def _read_enrolled_credential(workspace, tree):
+    import hashlib
+    if tree is None:
+        return None
     try:
         blob = tree.read(FILE, 8256)
     except FileNotFoundError:
-        blob = None
-    if blob is not None:
-        key = tree.read('state.key', 32)
-        if len(key) != 32 or len(blob) < 29 or blob[:1] != b'\x01':
-            raise ValueError('Invalid private state')
-        if os.name == 'posix' and tree.info('state.key').st_mode & 0o077:
-            raise ValueError('Private key permissions denied')
-        from cryptography.exceptions import InvalidTag
-        try:
-            credential = validate(json.loads(AESGCM(key).decrypt(blob[1:13], blob[13:], AAD + hashlib.sha256(str(workspace).encode()).digest())))
-        except InvalidTag as exc:
-            raise ValueError('Private state authentication failed') from exc
-        value.update(paired=True, gateway=credential['session']['worker'])
+        return None
+    key = tree.read('state.key', 32)
+    if len(key) != 32 or len(blob) < 29 or blob[:1] != b'\x01':
+        raise ValueError('Invalid private state')
+    if os.name == 'posix' and tree.info('state.key').st_mode & 0o077:
+        raise ValueError('Private key permissions denied')
+    from cryptography.exceptions import InvalidTag
+    try:
+        return validate(json.loads(AESGCM(key).decrypt(blob[1:13], blob[13:], AAD + hashlib.sha256(str(workspace).encode()).digest())))
+    except InvalidTag as exc:
+        raise ValueError('Private state authentication failed') from exc
+
+
+def inspect_state(workspace, port=None):
+    """Inspect existing encrypted state without creating keys or returning credentials."""
+    tree = _existing_state_tree(workspace)
+    credential = _read_enrolled_credential(workspace, tree)
+    value = {'paired': credential is not None,
+             'gateway': credential['session']['worker'] if credential else None, 'local_agent': False}
     if port is not None:
         if not 1024 <= port <= 65535:
             raise ValueError('Invalid local port')
+        if tree is None:
+            return value
         try:
             from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler, Request
             class NoRedirect(HTTPRedirectHandler):

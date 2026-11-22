@@ -19,7 +19,7 @@ function bucket(path:string):string|null {
   if(['/devices/pair/start','/devices/claim'].includes(path))return 'pairing';
   if(['/devices/pair/poll','/devices/pair/proof'].includes(path))return 'polling';
   if(path==='/token')return 'token';
-  if(path==='/jan-relay/connect')return 'relay';
+  if(path==='/jan-relay/connect'||path==='/device-transfer/verify')return 'relay';
   if(path==='/mcp')return 'mcp';
   return null;
 }

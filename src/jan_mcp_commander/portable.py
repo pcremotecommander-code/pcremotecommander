@@ -165,10 +165,10 @@ class PortableCommander(AdvancedCommander):
             return {'name': name, 'exit_code': 0, 'output': platform.platform()}
         return super().diagnostic(name)
 
-    def skill_catalog(self):
+    def skill_catalog(self, skill=None):
         self._rate()
         from .skills import catalog
-        return catalog()
+        return catalog(skill)
 
     def route_skill(self, request, skill=None):
         self._rate()

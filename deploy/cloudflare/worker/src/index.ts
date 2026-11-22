@@ -11,6 +11,7 @@ import {verifiedSubscriptionEvent,pricingConfiguration} from './billing.ts';
 import {deviceStore} from './device_portal.ts';
 import {internalBillingHistory} from './billing_history.ts';
 import {publicRateLimit} from './public_rate_limit.ts';
+import {checkTransferRequest} from './transfer_access.ts';
 import {PUBLIC_SCOPES,SUPPORTED_SCOPES} from './oauth_scopes.ts';
 export {JanDeviceStore} from './device_store.ts';
 interface Env extends Settings {OAUTH_KV:KVNamespace;OAUTH_PROVIDER:OAuthHelpers;DEVICES:DurableObjectNamespace;PACKAGE_BUCKET?:R2Bucket;}
@@ -92,6 +93,7 @@ export default {
     }
     if(path==='/billing/pricing-config')return pricingConfiguration(request,env);
     if(path.startsWith('/downloads/'))return downloadPackage(request,env,ctx);
+    if(path==='/device-transfer/verify')return checkTransferRequest(request,env);
     // Device-initiated WebSocket: only signed, enrolled devices are admitted by the DO.
     // This route does not accept AI tool calls; those remain OAuth protected at /mcp.
     if(path==='/jan-relay/connect') {

@@ -135,7 +135,8 @@ class SafeTree:
             check(info, directory=stat.S_ISDIR(info.st_mode))
             return info
 
-    def read(self, name, limit=LIMIT):
+    @contextmanager
+    def open_read(self, name):
         with self.parent(name) as (parent, leaf), ExitStack() as stack:
             if os.name == 'posix':
                 fd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
@@ -143,6 +144,10 @@ class SafeTree:
                 check(os.fstat(fd))
             else:
                 fd = stack.enter_context(windows_guard(parent / leaf, directory=False))
+            yield fd
+
+    def read(self, name, limit=LIMIT):
+        with self.open_read(name) as fd:
             if os.fstat(fd).st_size > limit:
                 raise ValueError('File size limit exceeded')
             chunks = bytearray()
@@ -163,7 +168,10 @@ class SafeTree:
                 (parent / leaf).mkdir()
 
     def write(self, name, data, overwrite=False):
-        """Atomic replacement, or exclusive creation without a check/replace race."""
+        self.write_chunks(name, (data,), overwrite=overwrite)
+
+    def write_chunks(self, name, chunks, overwrite=False):
+        """Commit streamed bytes only after all chunks arrive successfully."""
         with self.parent(name) as (parent, leaf):
             tmp = '.jan-mcp-' + uuid.uuid4().hex + '.tmp'
             posix = os.name == 'posix'
@@ -173,7 +181,8 @@ class SafeTree:
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, **kw)
             try:
                 with os.fdopen(fd, 'wb') as out:
-                    out.write(data)
+                    for chunk in chunks:
+                        out.write(chunk)
                     out.flush()
                     os.fsync(out.fileno())
                 if overwrite:

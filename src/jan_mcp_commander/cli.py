@@ -243,6 +243,9 @@ def main(argv=None) -> int:
     if remaining and remaining[0]=='pdf':
         from .pdf_tools import main as pdf_main
         return pdf_main(remaining[1:], workspace=known.workspace)
+    if remaining and remaining[0] == 'transfer':
+        from .lan_transfer import main as transfer_main
+        return transfer_main(remaining[1:], workspace=known.workspace)
     if remaining and remaining[0]=='skills':
         from .skills_cli import main as skills_main
         return skills_main(remaining[1:],workspace=known.workspace)
@@ -256,7 +259,7 @@ def main(argv=None) -> int:
     parser.add_argument('--content', help='Literal text for a one-shot write/overwrite')
     parser.add_argument('--json', action='store_true', help='Return a JSON result for a one-shot command')
     parser.add_argument('--version', action='version', version=f'PC Remote Commander {VERSION}')
-    parser.add_argument('request', nargs='*', help='Command words, or chat/serve')
+    parser.add_argument('request', nargs='*', help='Command words, or chat, serve, skills, development, documents, media, pdf, transfer or remote')
     args = parser.parse_args(argv)
     if args.allow_writes:
         os.environ['JAN_MCP_ALLOW_WRITES'] = '1'

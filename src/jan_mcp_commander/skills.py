@@ -7,6 +7,7 @@ import json
 import math
 import re
 import uuid
+from .portable_skills import list_portable, skill_info, suggest_portable, SKILLS
 
 CATALOG = {
     'connection-diagnostics': {'description':'Inspect PCRC status and fixed runtime diagnostics.', 'tools':['jan_status','jan_diagnostic'], 'cli':'diagnostic python_version'},
@@ -180,7 +181,8 @@ PATTERNS.update({
 })
 METHODS = {'rules','explicit','selector','clarification'}
 OUTCOMES = {'success','failure','cancelled','unknown'}
-CATEGORIES = set(CATALOG) | {'unknown','ambiguous'}
+SUPPORTED_SKILLS = dict.fromkeys([*CATALOG, *SKILLS])
+CATEGORIES = set(SUPPORTED_SKILLS) | {'unknown','ambiguous'}
 MAX_FEEDBACK = 131072
 
 @dataclass(frozen=True)
@@ -197,15 +199,22 @@ class RuleSelector:
         found = [key for key,value in features.items() if value]
         return Prediction(found[0], 1.0) if len(found)==1 else None
 
-def catalog():
+def catalog(skill=None):
+    if skill is not None:
+        return skill_info(skill, full=True)
     return {'skills':[{'id':key,**value} for key,value in CATALOG.items()],
-            'packs':[{'id': key, 'skills': value.copy()} for key, value in PACKS.items()], 'advisory_only':True}
+            'portable_skills':list_portable(), 'packs':[{'id': key, 'skills': value.copy()} for key, value in PACKS.items()], 'advisory_only':True}
 
 def route(request, explicit=None, selector: Selector | None = None):
     if not isinstance(request,str) or len(request)>4096 or '\x00' in request:
         raise ValueError('Routing requires at most 4096 characters without NUL')
-    if explicit is not None and (not isinstance(explicit,str) or explicit not in CATALOG):
+    if explicit is not None and (not isinstance(explicit,str) or explicit not in SUPPORTED_SKILLS):
         raise ValueError('Unknown skill; list supported skills')
+    if explicit in SKILLS and explicit not in CATALOG:
+        return {'selected_skill': explicit, 'category': explicit, 'routing_method': 'explicit',
+                'suggestions': [explicit], 'requires_clarification': False, 'workflow': skill_info(explicit, full=True),
+                'advisory_only': True, 'execution_performed': False, 'permissions_granted': False}
+    recommendations = suggest_portable(request) if not explicit else []
     features={key:bool(re.search(pattern,request.casefold())) for key,pattern in PATTERNS.items()}
     if features.get('pdf-work') and not explicit:
         features['document-work']=False
@@ -234,8 +243,19 @@ def route(request, explicit=None, selector: Selector | None = None):
                     selected=prediction.skill;method='selector'
             except Exception:
                 pass  # Advisory predictor unavailable: retain deterministic fallback; never log exception text.
+    if recommendations:
+        return {'selected_skill': recommendations[0]['id'], 'category': 'project-execution',
+                'routing_method': 'rules', 'suggestions': [item['id'] for item in recommendations],
+                'recommended_sequence': recommendations, 'requires_clarification': False,
+                'advisory_only': True, 'execution_performed': False, 'permissions_granted': False}
+    if not selected and not candidates:
+        goal = request.casefold()
+        candidates = [name for name in SKILLS if re.search(r'\b' + re.escape(name.replace('-', ' ')) + r'\b', goal)]
+        if len(candidates) == 1:
+            selected = candidates[0]
     if not selected:method='clarification'
-    return {**({'workflow':CATALOG[selected]} if selected and 'steps' in CATALOG[selected] else {}), 'selected_skill':selected, 'category':selected or ('ambiguous' if len(candidates)>1 else 'unknown'),
+    return {**({'workflow':CATALOG[selected]} if selected and 'steps' in CATALOG.get(selected, {}) else
+               {'workflow':skill_info(selected, full=True)} if selected in SKILLS and selected not in CATALOG else {}), 'selected_skill':selected, 'category':selected or ('ambiguous' if len(candidates)>1 else 'unknown'),
             'routing_method':method, 'suggestions':candidates or list(CATALOG),
             'requires_clarification':selected is None, 'advisory_only':True,
             'execution_performed':False,'permissions_granted':False}
@@ -268,13 +288,13 @@ class Feedback:
         return rows
     @staticmethod
     def _validate(category, selected_skill, method, outcome, correction, reviewed):
-        if (not all(isinstance(x,str) for x in (category,selected_skill,method,outcome,correction)) or category not in CATEGORIES or selected_skill not in CATALOG or method not in METHODS or
-            outcome not in OUTCOMES or correction not in ('',*CATALOG) or type(reviewed) is not bool):
+        if (not all(isinstance(x,str) for x in (category,selected_skill,method,outcome,correction)) or category not in CATEGORIES or selected_skill not in SUPPORTED_SKILLS or method not in METHODS or
+            outcome not in OUTCOMES or correction not in ('',*SUPPORTED_SKILLS) or type(reviewed) is not bool):
             raise ValueError('Feedback accepts only catalog IDs, fixed routing/outcome labels and a review boolean')
     def status(self):
         with self.store.locked():
             config=self._config();rows=self._rows()
-        counts={key:0 for key in CATALOG}
+        counts={key:0 for key in SUPPORTED_SKILLS}
         for row in rows:
             if row['reviewed']:counts[row['correction'] or row['selected_skill']]+=1
         return {**config,'records':len(rows),'reviewed_by_skill':counts,'training_ready':False,

@@ -12,6 +12,7 @@ import {CONTROL_CATALOG_READ_TOOLS,validateRelayRequest} from './relay_protocol.
 import {requiresWebsiteApproval} from './native_confirmation.ts';
 import {actionAccess,type PendingAction} from './action_access.ts';
 import {pairingStore} from './pairing.ts';
+import {verifyTransfer} from './transfer_access.ts';
 import {authenticatedAccountId,authenticatedGitHubId,permittedAccount,validEmailUsername} from './account_identity.ts';
 import {openRecord,sealRecord,type SealedRecord} from './secure_store.ts';
 type Entry = Record<string,unknown>;
@@ -152,6 +153,20 @@ export class JanDeviceStore {
     }
     if(request.method!=='POST') return json({error:'Method denied'},405);
     const path=new URL(request.url).pathname;
+    if(path==='/transfer/verify') {
+      const proof:unknown=await request.json().catch(()=>null);
+      const verified=await verifyTransfer(proof,accountId,async (source,destination)=>{
+        const devices=await this.state.storage.get<Record<string,Entry>>('devices')??{};
+        const keyFor=(id:string)=>{
+          const device=devices[id];
+          return device?.ownerId===accountId&&!device.revoked&&typeof device.publicKey==='string'&&
+            Array.isArray(device.capabilities)&&device.capabilities.includes('files')&&
+            this.relay.getSession(id)?.online?device.publicKey:null;
+        };
+        return [keyFor(source),keyFor(destination)];
+      });
+      return verified?new Response(null,{status:204,headers:{'Cache-Control':'no-store'}}):json({error:'Transfer denied. Both devices must be online, enrolled to the same account, and approved for files.'},403);
+    }
     if(path==='/relay/dispatch') {
       let input:unknown;
       try {

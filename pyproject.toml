@@ -26,7 +26,7 @@ jan-mcp-commander = "jan_mcp_commander.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-jan_mcp_commander = ["vendor/*", "media-manifest.json", "privacy-rules.json", "skill_data/jan-commander/SKILL.md", "skill_data/pcrc-computer-use/SKILL.md", "skill_data/jan-commander/agents/*.yaml", "skill_data/jan-commander/references/*.md"]
+jan_mcp_commander = ["vendor/*", "media-manifest.json", "privacy-rules.json", "skill_data/*/SKILL.md", "skill_data/jan-commander/agents/*.yaml", "skill_data/jan-commander/references/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

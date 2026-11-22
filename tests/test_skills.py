@@ -119,7 +119,7 @@ def test_mcp_read_routes_do_not_grant_control(cmd):
     _,token,_=prepare_backend(cmd.workspace,initialize=True)
     headers={'Authorization':'Bearer '+token,'Host':'localhost:8866','Accept':'application/json, text/event-stream'}
     with TestClient(create_app(cmd,token)) as client:
-        for i,(name,args) in enumerate([('jan_skills',{}),('jan_route_skill',{'request':'run project'}),('jan_skill_guide',{}),('jan_feedback_status',{})]):
+        for i,(name,args) in enumerate([('jan_skills',{}),('jan_skills',{'skill':'browser-navigation'}),('jan_route_skill',{'request':'run project'}),('jan_skill_guide',{}),('jan_feedback_status',{})]):
             response=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':i,'method':'tools/call','params':{'name':name,'arguments':args}})
             assert response.status_code==200 and not response.json()['result'].get('isError'),response.text
         denied=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':9,'method':'tools/call','params':{'name':'jan_write_text','arguments':{'path':'blocked.txt','content':'blocked'}}})
@@ -202,3 +202,82 @@ def test_skill_pack_routes(request_text, expected):
     packs = catalog()['packs']
     assert len({skill for pack in packs for skill in pack['skills']}) == sum(len(pack['skills']) for pack in packs)
     assert expected in {skill for pack in packs for skill in pack['skills']}
+
+
+@pytest.mark.parametrize('agent,relative',[('codex','.agents/skills'),('claude','.claude/skills')])
+def test_portable_skill_lifecycle(tmp_path, monkeypatch, agent, relative):
+    from hashlib import sha256
+    from pathlib import Path
+    from jan_mcp_commander.portable_skills import manage_skills, skill_info
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    skill = 'computer-diagnostics'
+    directory = tmp_path / relative / skill
+    assert manage_skills('install', agent, [skill], dry_run=True)['dry_run']
+    assert not directory.parent.exists()
+    assert manage_skills('install', agent, [skill])['results'][0]['status'] == 'installed'
+    assert manage_skills('install', agent, [skill])['results'][0]['status'] == 'current'
+    assert manage_skills('installed', agent)['results'][0]['version'] == '1.0.0'
+    path = directory / 'SKILL.md'
+    original = path.read_bytes()
+    older = original.replace(b'1.0.0', b'0.9.0')
+    path.write_bytes(older)
+    marker = directory / '.pcrc-skill.json'
+    data = json.loads(marker.read_bytes())
+    data['releases'] = {sha256(older).hexdigest(): '0.9.0'}
+    marker.write_text(json.dumps(data), encoding='utf-8')
+    assert manage_skills('update', agent)['results'][0]['status'] == 'updated'
+    assert path.read_text(encoding='utf-8') == skill_info(skill, full=True)['content']
+    path.write_bytes(original + b'\nMy own changes')
+    with pytest.raises(ValueError):
+        manage_skills('uninstall', agent, [skill])
+    assert path.read_bytes().endswith(b'My own changes')
+    path.write_bytes(original)
+    (directory / 'personal-notes.txt').write_text('preserve me', encoding='utf-8')
+    manage_skills('uninstall', agent, [skill])
+    assert not path.exists() and (directory / 'personal-notes.txt').exists()
+
+
+def test_portable_catalog_matches_mcp_and_recommends_ordered_workflow():
+    from pathlib import Path
+    from jan_mcp_commander.portable_skills import PROJECT_SEQUENCE
+    import re
+    import yaml
+    root = Path(__file__).resolve().parents[1]
+    tasks = (root / 'deploy/mcp-task-server/src/tasks.ts').read_text(encoding='utf-8')
+    tools = set(re.findall(r"register\(server,\s*service,\s*access,\s*'([a-z_]+)'", tasks))
+    entries = catalog()['portable_skills']
+    assert len(entries) == 25
+    for entry in entries:
+        details = catalog(entry['id'])
+        metadata = yaml.safe_load(details['content'].split('---', 2)[1])
+        assert set(metadata) == {'name', 'description', 'metadata'}
+        assert metadata['name'] == entry['id']
+        assert metadata['metadata']['version'] == entry['version']
+        assert set(entry['tools']) <= tools
+        assert details['permissions_granted'] is False
+    result = route('Find a Python project, inspect its dependencies, fix the error, and run its tests.')
+    assert [x['id'] for x in result['recommended_sequence']] == PROJECT_SEQUENCE
+    assert not result['permissions_granted'] and not result['execution_performed']
+    with pytest.raises(ValueError):
+        catalog('../private')
+
+
+def test_portable_install_preserves_unmanaged_and_blocks_linked_directories(tmp_path, monkeypatch):
+    from pathlib import Path
+    from jan_mcp_commander.portable_skills import manage_skills
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    directory = tmp_path / '.agents/skills/file-search'
+    directory.mkdir(parents=True)
+    user_file = directory / 'SKILL.md'
+    user_file.write_text('user content', encoding='utf-8')
+    with pytest.raises(ValueError):
+        manage_skills('install', 'codex', ['file-search'])
+    assert user_file.read_text(encoding='utf-8') == 'user content'
+    with pytest.raises(ValueError):
+        manage_skills('install', 'codex', ['../file-search'])
+    try:
+        (tmp_path / '.claude').symlink_to(tmp_path / '.agents', target_is_directory=True)
+    except OSError:
+        pytest.skip('Creating a directory symlink requires OS permission')
+    with pytest.raises((ValueError, OSError)):
+        manage_skills('install', 'claude', ['computer-diagnostics'])

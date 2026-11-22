@@ -49,6 +49,28 @@ def test_inspect_rejects_tampered_state_without_replacing_it(tmp_path, monkeypat
         pairing_state.inspect_state(workspace)
 
 
+def test_inspect_with_port_uses_existing_local_key(tmp_path, monkeypatch):
+    import urllib.request
+    from jan_mcp_commander.http_server import prepare_backend
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    monkeypatch.setenv('JAN_MCP_STATE_DIR', str(tmp_path / 'private'))
+    assert pairing_state.inspect_state(workspace, 45000)['local_agent'] is False
+    commander, local_key, _ = prepare_backend(workspace, initialize=True)
+    pairing_state.write_credential(commander._store, credential(), overwrite=False)
+
+    def connect(request, timeout):
+        assert request.full_url == 'http://127.0.0.1:45000/healthz'
+        assert request.get_header('Authorization') == 'Bearer ' + local_key
+        response = io.BytesIO(b'{"status":"ok"}')
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(urllib.request, 'build_opener', lambda *args: SimpleNamespace(open=connect))
+    assert pairing_state.inspect_state(workspace, 45000)['local_agent'] is True
+
+
 def test_private_pairing_state_roundtrip_preserves_legacy_enrollment(tmp_path, monkeypatch, capsys):
     workspace = tmp_path/'workspace'; workspace.mkdir()
     monkeypatch.setenv('JAN_MCP_STATE_DIR', str(tmp_path/'private'))
