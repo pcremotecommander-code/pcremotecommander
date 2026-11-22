@@ -8,21 +8,21 @@
 
 PCRC lets a compatible AI assistant work with files, commands, an isolated browser, and desktop apps on a computer you approve. Use it to check a local project, update a document, or run a test without copying every result back into chat.
 
-[![GitHub prerelease](https://img.shields.io/github/v/release/pcremotecommander-code/pcremotecommander?include_prereleases&label=GitHub%20release)](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.46)
+[![GitHub prerelease](https://img.shields.io/github/v/release/pcremotecommander-code/pcremotecommander?include_prereleases&label=GitHub%20release)](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.48)
 [![npm beta](https://img.shields.io/npm/v/pcremotecommander/beta?label=npm%20beta)](https://www.npmjs.com/package/pcremotecommander)
 [![npm weekly downloads](https://img.shields.io/npm/dw/pcremotecommander)](https://www.npmjs.com/package/pcremotecommander)
 [![Source checks on next](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml/badge.svg?branch=next)](https://github.com/pcremotecommander-code/pcremotecommander/actions/workflows/source-checks.yml?query=branch%3Anext)
 [![GitHub issues](https://img.shields.io/github/issues/pcremotecommander-code/pcremotecommander)](https://github.com/pcremotecommander-code/pcremotecommander/issues)
 
-[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Setup](#quick-start) · [Tools](#available-tools) · [Troubleshooting](#troubleshooting) · [Support PCRC](#support-pcrc--buy-me-a-coffee) · [Beta.46 release notes](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.46)
+[Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Setup](#quick-start) · [Tools](#available-tools) · [Troubleshooting](#troubleshooting) · [Support PCRC](#support-pcrc--buy-me-a-coffee) · [Beta.48 release notes](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.48)
 
-> **[New in 0.7.0-beta.46](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.46)** · The Cloudflare relay wakes less often while devices are idle, and the launcher skips duplicate startup checks. The device dashboard shows personal account activity, and the owner dashboard shows aggregate tool health. [Beta.45 keyboard and tool reference](docs/beta45-keyboard-release.md).
+> **[New in 0.7.0-beta.48](https://github.com/pcremotecommander-code/pcremotecommander/releases/tag/v0.7.0-beta.48)** · Transfer files directly over a trusted local network between two online computers enrolled in the same PCRC account. The receiver accepts up to 120 MB by default. The prerelease includes npm setup and file-transfer commands. [File-transfer source on next](https://github.com/pcremotecommander-code/pcremotecommander/tree/next).
 
 > **Community update** · [An apology and an update on recent service interruptions](ANNOUNCEMENT.md).
 
 ## Quick start
 
-1. On the Windows PC you want to connect, [download Start-PCRC.cmd](https://pc-remote-commander.pcremotecommander.workers.dev/install/Start-PCRC-beta46.cmd) and double-click it. If you already have Node.js 20+ and npm, run:
+1. On the Windows PC you want to connect, [download Start-PCRC.cmd](https://pc-remote-commander.pcremotecommander.workers.dev/install/Start-PCRC-beta48.cmd) and double-click it. If you already have Node.js 20+ and npm, run:
 
    ```cmd
    npx --yes pcremotecommander@beta setup
