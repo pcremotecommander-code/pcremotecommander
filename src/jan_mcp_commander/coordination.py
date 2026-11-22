@@ -132,6 +132,9 @@ class Coordination:
                     raise CoordinationError('TASK_CONFLICT', 'Task is assigned or requires review. Inspect list_tasks before continuing.')
                 agent = args.get('agent', '')
                 resources = args.get('resources', [])
+                wait = args.get('wait', True)
+                if type(wait) is not bool:
+                    raise ValueError('wait must be true or false')
                 if not isinstance(agent, str) or not 1 <= len(agent) <= 80 or not isinstance(resources, list) or not 1 <= len(resources) <= 20:
                     raise ValueError('Agent label and 1..20 resources required')
                 resources = sorted(set(resource(r) for r in resources))
@@ -139,8 +142,19 @@ class Coordination:
                 task.update(agent=agent, resources=resources, status='waiting', expires_at=self.clock() + 120,queue_order=order,
                             lease_token=secrets.token_urlsafe(32), revision=task['revision'] + 1)
                 self.promote(data)
+                if not wait and task['status'] == 'waiting':
+                    raise CoordinationError(
+                        'TASK_CONFLICT',
+                        'The requested assignment is busy. No waiting request was saved. Inspect list_tasks before trying again.',
+                    )
                 self.save(data)
-                return {**self.public(task), 'lease_token': task['lease_token'], 'instructions': 'Waiting grants no execution access. Poll renew_task with this token within 120 seconds until active; assignment never replays an operation. Reinspect files and hashes before editing. Include task_id and lease_token on each operation. Labels are not authenticated model identities.'}
+                instructions = (
+                    'Waiting grants no execution access. Poll renew_task within 120 seconds until active. '
+                    if task['status'] == 'waiting' else
+                    'Assignment is active. Use only the approved operations within its resources. '
+                )
+                return {**self.public(task), 'lease_token': task['lease_token'],
+                        'instructions': instructions + 'Reinspect files and hashes before editing. Include task_id and lease_token on each assigned operation.'}
             if action in {'renew', 'finish'}:
                 self.validate(task, args.get('lease_token'),waiting=True)
                 if action == 'renew':

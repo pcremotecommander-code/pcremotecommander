@@ -2,7 +2,7 @@
 name: application-management
 description: "Find and open an installed application on the selected PC."
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Application management
@@ -20,6 +20,8 @@ Find and open an installed application on the selected PC.
 Get the user's goal, approved computer or workspace, and any exact targets before proceeding. Check that the requested tools are available in the current client.
 
 Match its registered ID. Ask before opening the app, then inspect the active window or report that its appearance is unverified.
+
+For a single launch, call `open_application` directly after approval. A separate shared assignment is unnecessary unless the workflow needs one. If PCRC returns `TASK_CONFLICT`, report the conflict and inspect reservations. A launch request does not import a file. Verify any separately approved import in the application itself.
 
 ## Output and recovery
 

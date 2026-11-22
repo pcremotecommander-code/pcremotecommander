@@ -32,6 +32,23 @@ def assigned(task, call):
         assignment.reset(marker)
 
 
+def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    holder = claim(store, 'Previous workspace operation', ['workspace'])
+    now[0] += 121
+    task = store.task('create', title='Open approved app')
+    target = dict(task_id=task['id'], agent='Interactive', resources=['ui'], wait=False)
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', **target)
+    assert error.value.code == 'TASK_CONFLICT'
+    current = {item['id']: item for item in store.task('list')['tasks']}
+    assert current[task['id']] == task
+    assert current[holder['id']]['status'] == 'needs_review'
+    store.task('reconcile', task_id=holder['id'], reviewed=True)
+    assert store.task('claim', **target)['status'] == 'active'
+
+
 def test_eight_assignments_and_capacity_queue_promote_after_release(pc):
     store=coordinator(pc)
     active=[claim(store,str(i),[f'file:{i}.txt']) for i in range(8)]

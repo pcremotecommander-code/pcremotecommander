@@ -38,6 +38,8 @@ test('four MCP clients share real assignments and queue overlapping claims witho
     const ld = data(await call(d.client, 'claim_task', { task_id: fourth.id, agent: 'D', resources: ['file:d.txt'], confirmed: true }));
     assert.equal(ld.status,'active');
     const fifth=data(await call(c.client,'create_task',{title:'Queued same-file review',confirmed:true}));
+    const immediate=await call(c.client,'claim_task',{task_id:fifth.id,agent:'Reviewer',resources:['file:a.txt'],wait:false,confirmed:true});
+    assert.equal((immediate.structuredContent as {error_code:string}).error_code,'TASK_CONFLICT');
     const waiting=data(await call(c.client,'claim_task',{task_id:fifth.id,agent:'Reviewer',resources:['file:a.txt'],confirmed:true}));
     assert.equal(waiting.status,'waiting');
     const lease = (l: Record<string, unknown>) => ({ task_id: l.id, lease_token: l.lease_token });
