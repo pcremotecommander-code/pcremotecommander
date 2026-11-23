@@ -106,6 +106,26 @@ def terminate_windows_job(handle):
     return bool(kernel32.TerminateJobObject(wintypes.HANDLE(handle), 125))
 
 
+def terminate_windows_job_and_wait(handle):
+    """Terminate every Job Object member and retain the caller's lock until exit."""
+    if not handle or os.name != "nt":
+        return False
+    terminated = False
+    while True:
+        try:
+            active = windows_job_active_processes(handle)
+        except OSError:
+            terminate_windows_job(handle)
+            time.sleep(0.05)
+            continue
+        if not active:
+            return terminated
+        terminated = terminate_windows_job(handle) or terminated
+        # TerminateJobObject initiates termination; do not release reservations
+        # until the kernel reports that every member has actually exited.
+        time.sleep(0.01)
+
+
 def windows_job_active_processes(handle):
     if not handle or os.name != "nt":
         return 0
@@ -243,7 +263,7 @@ def terminate_child_process_tree(pid, handle):
 
 def _kill_windows_tree(pid):
     if _JOB_HANDLE:
-        terminate_windows_job(_JOB_HANDLE)
+        terminate_windows_job_and_wait(_JOB_HANDLE)
         return
     if pid is None:
         return
@@ -575,11 +595,7 @@ def supervise(config):
             if os.name == "posix":
                 descendants_terminated = _terminate_linux_descendants()
             else:
-                try:
-                    if windows_job_active_processes(_JOB_HANDLE):
-                        descendants_terminated = terminate_windows_job(_JOB_HANDLE)
-                except OSError:
-                    descendants_terminated = terminate_windows_job(_JOB_HANDLE)
+                descendants_terminated = terminate_windows_job_and_wait(_JOB_HANDLE)
             # Once descendants are gone, the output pipe must reach EOF. Drain
             # buffered output without allowing a detached writer to hold the
             # workspace reservation open.
