@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -48,7 +49,7 @@ def install_pillow(destination,manifest):
 
 
 def build(base: Path, destination: Path, version: str = VERSION) -> dict:
-    if not isinstance(version, str) or not __import__("re").fullmatch(r"0\\.7\\.0-beta\\.[1-9][0-9]*", version):
+    if not isinstance(version, str) or not re.fullmatch(r"0\.7\.0-beta\.[1-9][0-9]*", version):
         raise ValueError("Release version must be a valid 0.7.0-beta.N version")
     subprocess.run(['node',str(ROOT/'scripts/generate_privacy_guard.cjs')],check=True)
     base = base.resolve()
