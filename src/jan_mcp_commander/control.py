@@ -802,6 +802,7 @@ class ControlCommander(PortableCommander):
             self.stop_session(result['session_id'])
 
     def session_output(self, session_id):
+        self._check('commands')
         entry = self._sessions.get(session_id)
         if entry is not None:
             self._check_session_task_access(entry)
@@ -822,8 +823,7 @@ class ControlCommander(PortableCommander):
         }
 
     def list_sessions(self):
-        if any(entry['profile'] == 'operator_command' for entry in self._sessions.values()):
-            self._check('commands')
+        self._check('commands')
         return super().list_sessions()
 
     def disable_control(self):
