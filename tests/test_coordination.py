@@ -517,3 +517,16 @@ def test_nested_guard_cannot_widen_outer_resource_scope(pc):
         with pytest.raises(CoordinationError, match='nested operation cannot widen'):
             with store.guard(['file:unrelated.txt']):
                 pytest.fail('widened nested operation executed')
+
+
+
+def test_operation_reservation_does_not_consume_active_task_quota(pc):
+    store = coordinator(pc)
+    for index in range(7):
+        claim(store, f'active task {index}', [f'file:task-{index}.txt'])
+
+    with store.guard(['file:independent-operation.txt']):
+        task = store.task('create', title='eighth task')
+        claimed = store.task('claim', task_id=task['id'], agent='worker',
+                             resources=['file:eighth-task.txt'])
+        assert claimed['status'] == 'active'
