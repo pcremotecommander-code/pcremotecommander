@@ -103,8 +103,10 @@ class Coordination:
                     and isinstance(lock_resources, list) and bool(lock_resources)
                     and all(
                         isinstance(item, str) and (
-                            item.startswith('session:') and len(item) == 40
-                            and all(ch in '0123456789abcdef' for ch in item[8:])
+                            (item.startswith('session:') and len(item) == 40
+                             and all(ch in '0123456789abcdef' for ch in item[8:]))
+                            or (item.startswith('session-owner:') and len(item) == 46
+                                and all(ch in '0123456789abcdef' for ch in item[14:]))
                             or resource(item) == item
                         )
                         for item in lock_resources
@@ -144,7 +146,7 @@ class Coordination:
 
         return {'recovered': recovered, 'busy': busy, 'changed': changed}
 
-    def register_detached_operation(self, lock_resource, *, supervisor_pid=None):
+    def register_detached_operation(self, lock_resource, owner_lock_resource, *, supervisor_pid=None):
         """Publish a durable workspace reservation backed by a supervisor lock.
 
         The caller must already be inside a coordinated outer operation. The
@@ -156,7 +158,11 @@ class Coordination:
             raise CoordinationError('TASK_SCOPE_DENIED', 'Detached commands must start inside a coordinated workspace operation.')
         if (not isinstance(lock_resource, str) or not lock_resource.startswith('session:')
                 or len(lock_resource) != 40
-                or any(ch not in '0123456789abcdef' for ch in lock_resource[8:])):
+                or any(ch not in '0123456789abcdef' for ch in lock_resource[8:])
+                or not isinstance(owner_lock_resource, str)
+                or not owner_lock_resource.startswith('session-owner:')
+                or len(owner_lock_resource) != 46
+                or any(ch not in '0123456789abcdef' for ch in owner_lock_resource[14:])):
             raise ValueError('Invalid detached session lock identifier')
         with self.store.locked():
             data = self.load()
@@ -192,7 +198,7 @@ class Coordination:
                 'id': identifier,
                 'state': 'active',
                 'resources': list(targets),
-                'lock_resources': [lock_resource],
+                'lock_resources': [lock_resource, owner_lock_resource],
                 'owner': {'pid': os.getpid(), 'thread': threading.get_ident(),
                           'supervisor_pid': supervisor_pid},
                 'task_id': task_id,
