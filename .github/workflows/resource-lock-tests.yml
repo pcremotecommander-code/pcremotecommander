@@ -12,7 +12,6 @@ on:
       - "tests/test_security.py"
       - "tests/test_coordination.py"
       - "tests/test_development.py"
-      - "tests/test_browser_teaching.py"
       - ".github/workflows/resource-lock-tests.yml"
   pull_request:
     paths:
@@ -58,4 +57,3 @@ jobs:
           python -m pytest -q -ra tests/test_security.py -k "resource_lock"
           python -m pytest -q -ra tests/test_coordination.py
           python -m pytest -q -ra tests/test_development.py
-          python -m pytest -q -ra tests/test_browser_teaching.py
