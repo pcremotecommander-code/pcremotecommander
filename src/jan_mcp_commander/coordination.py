@@ -15,6 +15,7 @@ from .security import PrivateStore
 
 assignment = ContextVar('pcrc_assignment', default=None)
 MAX_ACTIVE_ASSIGNMENTS = 8
+MAX_OPERATION_RECORDS = 500
 
 
 class CoordinationError(PermissionDenied):
@@ -151,6 +152,10 @@ class Coordination:
             return False
         tasks=data['tasks'].values()
         held=[t for t in tasks if t['status'] in {'active','needs_review'}]
+        for operation in data.get('operations', {}).values():
+            if operation.get('state') in {'active', 'needs_review'}:
+                resources = operation.get('resources')
+                held.append({'resources': resources if isinstance(resources, list) and resources else ['workspace']})
         blocked=[]
         changed=False
         for task in sorted((t for t in tasks if t['status']=='waiting'),key=lambda t:t['queue_order']):
@@ -273,28 +278,88 @@ class Coordination:
         if self.depth.get():
             yield
             return
-        with self.store.locked():
-            data = self.load()
-            self.expire(data)
-            current = assignment.get()
-            own = None
-            if current:
-                own = data['tasks'].get(current[0])
-                if own is None:
-                    raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
-                self.validate(own, current[1])
-                if any(not any(covers(r, target) for r in own['resources']) for target in resources):
-                    raise CoordinationError('TASK_SCOPE_DENIED', 'This operation exceeds the assignment. Finish and claim an appropriate reservation before continuing.')
-            for task in data['tasks'].values():
-                if task is own or task['status'] not in {'active', 'needs_review'}:
-                    continue
-                if any(overlaps(a, b) for a in task['resources'] for b in resources):
-                    raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
+
+        targets = sorted(set(resource(item) for item in resources))
+        operation_id = uuid.uuid4().hex
+        # Acquire resource locks before publishing the active record. A crash
+        # before publication cannot have entered user work; after publication,
+        # recovery will observe these OS locks while the operation is alive.
+        with ExitStack() as resource_locks:
+            for target in targets:
+                resource_locks.enter_context(self.store.resource_locked(target))
+
+            with self.store.locked():
+                data = self.load()
+                self.expire(data)
+                current = assignment.get()
+                own = None
+                if current:
+                    own = data['tasks'].get(current[0])
+                    if own is None:
+                        raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
+                    self.validate(own, current[1])
+                    if any(not any(covers(r, target) for r in own['resources']) for target in targets):
+                        raise CoordinationError('TASK_SCOPE_DENIED', 'This operation exceeds the assignment. Finish and claim an appropriate reservation before continuing.')
+                for task in data['tasks'].values():
+                    if task is own or task['status'] not in {'active', 'needs_review'}:
+                        continue
+                    if any(overlaps(a, b) for a in task['resources'] for b in targets):
+                        raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
+                for existing_id, existing in data.get('operations', {}).items():
+                    if existing.get('state') not in {'active', 'needs_review'}:
+                        continue
+                    existing_resources = existing.get('resources')
+                    if (not isinstance(existing_resources, list) or not existing_resources
+                            or any(not isinstance(item, str) for item in existing_resources)):
+                        raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
+                    if any(overlaps(a, b) for a in existing_resources for b in targets):
+                        raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying.')
+                operations = data.setdefault('operations', {})
+                if len(operations) >= MAX_OPERATION_RECORDS:
+                    completed = sorted(
+                        ((record.get('finished_at', 0), key) for key, record in operations.items()
+                         if record.get('state') == 'completed'),
+                    )
+                    while len(operations) >= MAX_OPERATION_RECORDS and completed:
+                        _, old_id = completed.pop(0)
+                        operations.pop(old_id, None)
+                    if len(operations) >= MAX_OPERATION_RECORDS:
+                        raise CoordinationError('OPERATION_CAPACITY', 'Private operation history is full of unresolved records. Review them before starting more work.')
+                operations[operation_id] = {
+                    'id': operation_id,
+                    'state': 'active',
+                    'resources': targets,
+                    'owner': {'pid': os.getpid(), 'thread': __import__('threading').get_ident()},
+                    'task_id': current[0] if current else None,
+                    'started_at': self.clock(),
+                }
+                self.save(data)
+
             marker = self.depth.set(True)
             try:
                 yield
+            except BaseException:
+                with self.store.locked():
+                    data = self.load()
+                    record = data.get('operations', {}).get(operation_id)
+                    if record and record.get('state') == 'active':
+                        record.update(
+                            state='needs_review',
+                            note='Operation raised after entry. Inspect actual effects before retrying; never replay automatically.',
+                            finished_at=self.clock(),
+                        )
+                        self.save(data)
+                raise
+            else:
+                with self.store.locked():
+                    data = self.load()
+                    record = data.get('operations', {}).get(operation_id)
+                    if record and record.get('state') == 'active':
+                        record.update(state='completed', finished_at=self.clock())
+                        self.save(data)
             finally:
                 self.depth.reset(marker)
+
 
 
 def coordinator(commander):
