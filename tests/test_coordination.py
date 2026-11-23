@@ -782,3 +782,30 @@ def test_browser_teaching_runs_inside_ui_operation_scope(pc, monkeypatch):
         records = [r for r in store.load()['operations'].values()
                    if r.get('resources') == ['ui']]
     assert records[-1]['state'] == 'completed'
+
+
+
+def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
+    import queue
+    from threading import Event
+    store = coordinator(pc)
+    done = Event()
+    input_queue = queue.Queue(maxsize=4)
+    pc._sessions['live-command'] = {
+        'profile': 'operator_command',
+        'done': done,
+        'input_queue': input_queue,
+        'input_closed': False,
+    }
+
+    with pytest.raises(CoordinationError, match='owned command is still running'):
+        with store.guard(['file:while-command-runs.txt']):
+            pytest.fail('workspace operation entered during live command')
+
+    queued = pc.process_input('live-command', 'continue')
+    assert queued == {'queued': True, 'delivery_verified': False}
+    assert input_queue.get_nowait() == b'continue\n'
+
+    done.set()
+    with store.guard(['file:after-command.txt']):
+        pass
