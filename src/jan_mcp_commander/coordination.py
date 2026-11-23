@@ -1,5 +1,5 @@
 """Account-local task reservations, persisted outside the approved workspace."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
 from functools import wraps
 import inspect
@@ -57,8 +57,10 @@ class Coordination:
         try:
             blob = self.store.tree.read('tasks.enc', 2 * 1024 * 1024)
         except FileNotFoundError:
-            return {'tasks': {}, 'workflows': {}, 'runs': {}}
-        return json.loads(AESGCM(self.store.key).decrypt(blob[:12], blob[12:], self.store.context))
+            return {'tasks': {}, 'workflows': {}, 'runs': {}, 'operations': {}}
+        data = json.loads(AESGCM(self.store.key).decrypt(blob[:12], blob[12:], self.store.context))
+        data.setdefault('operations', {})
+        return data
 
     def save(self, data):
         raw = json.dumps(data, ensure_ascii=True).encode()
@@ -66,6 +68,63 @@ class Coordination:
             raise CoordinationError('TASK_CAPACITY', 'Private task storage is full. Review completed tasks locally.')
         nonce = os.urandom(12)
         self.store.tree.write('tasks.enc', nonce + AESGCM(self.store.key).encrypt(nonce, raw, self.store.context), overwrite=True)
+
+
+    def recover_operations(self):
+        """Two-phase recovery of abandoned operation records.
+
+        Phase one snapshots candidate records under the metadata lock. Phase
+        two probes every canonical resource without holding that lock. Phase
+        three reacquires metadata, verifies the record is unchanged, and
+        marks it review-required while the successful probe locks are still
+        held. Records are never deleted and actions are never replayed.
+        """
+        with self.store.locked():
+            data = self.load()
+            candidates = [
+                (identifier, dict(record))
+                for identifier, record in data.get('operations', {}).items()
+                if isinstance(record, dict) and record.get('state') == 'active'
+            ]
+
+        recovered = []
+        busy = []
+        changed = []
+        for identifier, snapshot in candidates:
+            resources = snapshot.get('resources')
+            if (not isinstance(resources, list) or not resources
+                    or any(not isinstance(item, str) or not item or resource(item) != item
+                           for item in resources)):
+                # Malformed metadata is not safe to release or reinterpret.
+                changed.append(identifier)
+                continue
+            with ExitStack() as locks:
+                acquired_all = True
+                for item in sorted(set(resources)):
+                    acquired = locks.enter_context(self.store.try_resource_locked(item))
+                    if not acquired:
+                        acquired_all = False
+                        break
+                if not acquired_all:
+                    busy.append(identifier)
+                    continue
+
+                with self.store.locked():
+                    latest = self.load()
+                    current = latest.get('operations', {}).get(identifier)
+                    if current != snapshot or current.get('state') != 'active':
+                        changed.append(identifier)
+                        continue
+                    current['state'] = 'needs_review'
+                    current['recovered_at'] = self.clock()
+                    current['note'] = (
+                        'Owner no longer holds the registered resource locks. '
+                        'Inspect actual effects before releasing reservations; never replay this operation.'
+                    )
+                    self.save(latest)
+                    recovered.append(identifier)
+
+        return {'recovered': recovered, 'busy': busy, 'changed': changed}
 
     def expire(self, data):
         changed = False
