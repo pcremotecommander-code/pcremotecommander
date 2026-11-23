@@ -97,8 +97,8 @@ function Start-Pcrc {
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $node = Get-PcrcNode $root
         Enable-PcrcCommands $root $node
-        $launcher = Join-Path $root 'pcremotecommander-beta45.cjs'
-        Get-PcrcVerifiedFile 'https://pc-remote-commander.pcremotecommander.workers.dev/install/pcremotecommander.cjs' $launcher '5be7a3b3296308752cbcf8b0528c854a0360db15827637b9534761d13984856d'
+        $launcher = Join-Path $root 'pcremotecommander-beta49.cjs'
+        Get-PcrcVerifiedFile 'https://pc-remote-commander.pcremotecommander.workers.dev/install/pcremotecommander.cjs' $launcher 'bd3edab4fff7f6784de464486470e461c6aa58653ea9bf709b44276c0970baec'
         Get-PcrcVerifiedFile 'https://pc-remote-commander.pcremotecommander.workers.dev/install/PCRC-retro-wide.cmd' (Join-Path $root 'PCRC-retro-wide.cmd') 'c1145849708e7af719b12a94c99718b8a47a15c5efee25423d1cfae8678f5222'
         & $node $launcher setup
         if ($LASTEXITCODE -ne 0) { throw "PCRC stopped (exit $LASTEXITCODE). Retry this same command, or contact support with the error text only." }
