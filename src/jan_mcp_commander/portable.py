@@ -103,8 +103,17 @@ class PortableCommander(AdvancedCommander):
                         break
                 proc.wait()
             finally:
-                proc.stdout.close()
-                entry['done'].set()
+                try:
+                    proc.stdout.close()
+                finally:
+                    callback = getattr(proc, 'pcrc_on_exit', None)
+                    try:
+                        if callback:
+                            callback()
+                    except Exception as exc:
+                        entry['callback_error'] = type(exc).__name__
+                    finally:
+                        entry['done'].set()
 
         def deadline():
             if not entry['done'].wait(lifetime):
