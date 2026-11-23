@@ -751,7 +751,7 @@ def test_synchronous_command_keeps_outer_workspace_operation_scope(pc, monkeypat
     pc._sessions['fake-session'] = {'profile': 'operator_command', 'done': done}
     observed = {}
 
-    def fake_start_process(command, shell, timeout_seconds):
+    def fake_start_process(command, shell):
         observed['scope'] = store.depth.get()
         return {'session_id': 'fake-session'}
 
