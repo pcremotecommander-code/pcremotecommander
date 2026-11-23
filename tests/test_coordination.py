@@ -79,6 +79,11 @@ def test_same_file_queue_is_fifo_persistent_and_never_replays_stale_edits(pc):
     assert reopened.task('renew',task_id=third['id'],lease_token=third['lease_token'])['status']=='waiting'
     with pytest.raises(ValueError):
         assigned(second,lambda:pc.edit_text('shared.txt','before','stale overwrite',stale,False))
+    with store.store.locked():
+        outcomes = [record for record in store.load()['operations'].values()
+                    if record.get('state') == 'failed']
+    assert len(outcomes) == 1
+    assert 'before mutation' in outcomes[0]['note']
     assert (pc.workspace/'shared.txt').read_text()=='first result'
     reopened.task('finish',task_id=second['id'],lease_token=second['lease_token'],status='completed')
     assert reopened.task('renew',task_id=third['id'],lease_token=third['lease_token'])['status']=='active'
