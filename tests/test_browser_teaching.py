@@ -177,7 +177,7 @@ def test_expired_ready_run_requires_review_and_fresh_lease_before_resume(demo):
     assert run['lease']['renew_before_seconds']==60
     assert 'lease_token' not in run['lease']
     old=assignment.get();clock=store.clock
-    store.clock=lambda:clock()+121
+    store.clock=lambda:clock()+601
     try:
         with pytest.raises(CoordinationError):pc.browser_workflow('run_next',{'run_id':run['id'],'expected_step':0})
         assert read_workflows(pc,'run',run['id'])['next_step']==0
