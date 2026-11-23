@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from .security import PrivateStore
@@ -264,15 +265,13 @@ def _enable_linux_subreaper():
         raise OSError(error, os.strerror(error))
 
 
-def _linux_descendants(root_pid):
-    """Return live descendants by walking /proc parent identities."""
-    if sys.platform != "linux":
-        return []
-    parents = {}
+def _linux_process_table():
+    """Snapshot PID parentage and start times from procfs."""
+    processes = {}
     try:
         entries = os.scandir("/proc")
     except OSError:
-        return []
+        return processes
     with entries:
         for entry in entries:
             if not entry.name.isdigit():
@@ -280,59 +279,98 @@ def _linux_descendants(root_pid):
             try:
                 raw = Path(entry.path, "stat").read_text()
                 fields = raw[raw.rfind(")") + 1:].split()
-                parents[int(entry.name)] = int(fields[1])
+                processes[int(entry.name)] = (int(fields[1]), int(fields[19]))
             except (OSError, ValueError, IndexError):
                 continue
-    descendants = set()
+    return processes
+
+
+def _linux_descendants(root_pid):
+    """Return (pid, start_time) identities below a process in the procfs tree."""
+    processes = _linux_process_table()
+    descendants = {}
     frontier = {root_pid}
     while frontier:
-        children = {pid for pid, parent in parents.items()
-                    if parent in frontier and pid not in descendants}
+        children = {
+            pid: start_time
+            for pid, (parent, start_time) in processes.items()
+            if parent in frontier and pid not in descendants
+        }
         if not children:
             break
         descendants.update(children)
-        frontier = children
-    return sorted(descendants, reverse=True)
+        frontier = set(children)
+    return sorted(descendants.items(), reverse=True)
+
+
+def _linux_kill_process_identity(pid, expected_start_time):
+    """Signal a PID only after binding and validating its process identity."""
+    pidfd = None
+    try:
+        if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+            pidfd = os.pidfd_open(pid, 0)
+            current = _linux_process_table().get(pid)
+            if current is None or current[1] != expected_start_time:
+                return False
+            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+            return True
+        current = _linux_process_table().get(pid)
+        if current is None or current[1] != expected_start_time:
+            return False
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The caller must retain the reservation if a descendant cannot be
+        # terminated; report it as still present and keep retrying.
+        return False
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
+
+
+def _reap_linux_children():
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
 
 
 def _terminate_linux_descendants():
-    """Kill and reap command descendants adopted by the Linux subreaper."""
+    """Kill and reap all descendants, retaining the lock until none remain."""
     if sys.platform != "linux":
         return False
     terminated = False
-    # Repeat to catch a descendant that forks while an earlier snapshot is
-    # being terminated. The command's direct child has already exited here.
-    for _ in range(10):
+    while True:
         descendants = _linux_descendants(os.getpid())
         if not descendants:
-            break
-        for pid in descendants:
-            try:
-                os.kill(pid, signal.SIGKILL)
+            _reap_linux_children()
+            if not _linux_descendants(os.getpid()):
+                return terminated
+        for pid, start_time in descendants:
+            if _linux_kill_process_identity(pid, start_time):
                 terminated = True
-            except ProcessLookupError:
-                pass
-            except PermissionError:
-                terminated = True  # Fail closed: do not report clean completion.
-        deadline = __import__("time").monotonic() + 0.2
-        while __import__("time").monotonic() < deadline:
-            try:
-                pid, _ = os.waitpid(-1, os.WNOHANG)
-                if pid == 0:
-                    __import__("time").sleep(0.01)
-            except ChildProcessError:
-                break
-    return terminated
+        _reap_linux_children()
+        # No timeout: if a process cannot be killed (for example, stuck in
+        # uninterruptible kernel sleep), keeping the reservation is safer than
+        # falsely declaring the workspace available.
+        time.sleep(0.01)
 
 
 def _parent_terminated(signum, frame):
-    # POSIX child commands have their own process group. Killing that complete
-    # group prevents descendants from outliving the supervisor reservation.
+    # First kill the ordinary process group, then on Linux remain alive as a
+    # subreaper until even daemonized descendants have exited and been reaped.
     if _CHILD_PGID is not None:
         try:
             os.killpg(_CHILD_PGID, signal.SIGKILL)
         except OSError:
             pass
+    if sys.platform == "linux":
+        _terminate_linux_descendants()
     os._exit(125)
 
 
