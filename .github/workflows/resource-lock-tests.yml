@@ -46,4 +46,4 @@ jobs:
       - name: Run resource-lock and recovery regression tests
         run: |
           python -m pytest -q -ra tests/test_security.py -k "resource_lock"
-          python -m pytest -q -ra tests/test_coordination.py -k "operation_recovery"
+          python -m pytest -q -ra tests/test_coordination.py
