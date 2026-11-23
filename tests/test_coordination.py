@@ -1053,6 +1053,7 @@ def test_workspace_content_search_cannot_escape_file_scoped_task(pc):
 
 
 def test_assigned_task_lists_only_its_own_command_sessions(pc):
+    import time
     from types import SimpleNamespace
     store = coordinator(pc)
     first = claim(store, 'first session owner', ['file:first.txt'])
