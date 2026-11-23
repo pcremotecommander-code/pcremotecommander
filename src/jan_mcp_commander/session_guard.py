@@ -13,79 +13,78 @@ from pathlib import Path
 from .security import PrivateStore
 
 _CHILD_PGID = None
+_CHILD_PID = None
+_PARENT_HANDLE = None
+_PARENT_DEAD = threading.Event()
+_SUPERVISOR_DONE = threading.Event()
 
 
-def assign_supervisor_job(process):
-    """Assign the waiting supervisor to a kill-on-close Windows Job Object."""
-    import ctypes
+def _kernel32():
+    return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def open_child_process_handle(pid):
+    """Open a stable Windows process identity handle in the PCRC parent."""
+    if os.name != "nt":
+        return None
     from ctypes import wintypes
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
-                                                  ctypes.c_void_p, wintypes.DWORD]
-    kernel32.SetInformationJobObject.restype = wintypes.BOOL
-    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in (
-            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
-
-    class BASIC_LIMIT(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class EXTENDED_LIMIT(ctypes.Structure):
-        _fields_ = [("BasicLimitInformation", BASIC_LIMIT),
-                    ("IoInfo", IO_COUNTERS),
-                    ("ProcessMemoryLimit", ctypes.c_size_t),
-                    ("JobMemoryLimit", ctypes.c_size_t),
-                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
-
-    job = kernel32.CreateJobObjectW(None, None)
-    job_value = job if isinstance(job, int) else getattr(job, "value", None)
-    if not job_value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    info = EXTENDED_LIMIT()
-    info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
-    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
-        error = ctypes.get_last_error()
-        kernel32.CloseHandle(job)
-        raise ctypes.WinError(error)
-    if not kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(process._handle)):
-        error = ctypes.get_last_error()
-        kernel32.CloseHandle(job)
-        raise ctypes.WinError(error)
-    return job_value
+    kernel32 = _kernel32()
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel32.OpenProcess(0x00100000 | 0x0001 | 0x1000, False, pid)
+    if not handle:
+        return None  # The command may already have exited.
+    return handle if isinstance(handle, int) else handle.value
 
 
-def close_supervisor_job(handle):
+def close_child_process_handle(handle):
     if handle and os.name == "nt":
-        import ctypes
         from ctypes import wintypes
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32()
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel32.CloseHandle.restype = wintypes.BOOL
         kernel32.CloseHandle(wintypes.HANDLE(handle))
 
 
+def terminate_child_process_tree(pid, handle):
+    """Kill a still-live child tree using a handle bound to the original PID."""
+    if os.name != "nt" or not handle:
+        return False
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    h = wintypes.HANDLE(handle)
+    if kernel32.WaitForSingleObject(h, 0) == 0:  # WAIT_OBJECT_0
+        return False
+    taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"),
+                            "System32", "taskkill.exe")
+    subprocess.run([taskkill, "/PID", str(pid), "/T", "/F"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=5, check=False)
+    if kernel32.WaitForSingleObject(h, 5000) == 258:  # WAIT_TIMEOUT
+        kernel32.TerminateProcess(h, 125)
+        kernel32.WaitForSingleObject(h, 5000)
+    return True
+
+
+def _kill_windows_tree(pid):
+    if pid is None:
+        return
+    handle = open_child_process_handle(pid)
+    if not handle:
+        return
+    try:
+        terminate_child_process_tree(pid, handle)
+    finally:
+        close_child_process_handle(handle)
+
+
 def _parent_terminated(signum, frame):
-    # Child commands have their own process group. A parent death or an
-    # orderly stop terminates that complete group before releasing the lock.
+    # POSIX child commands have their own process group. Killing that complete
+    # group prevents descendants from outliving the supervisor reservation.
     if _CHILD_PGID is not None:
         try:
             os.killpg(_CHILD_PGID, signal.SIGKILL)
@@ -94,22 +93,48 @@ def _parent_terminated(signum, frame):
     os._exit(125)
 
 
+def _watch_windows_parent():
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    while not _SUPERVISOR_DONE.is_set():
+        result = kernel32.WaitForSingleObject(wintypes.HANDLE(_PARENT_HANDLE), 250)
+        if result == 0:  # PCRC parent process exited.
+            _PARENT_DEAD.set()
+            _kill_windows_tree(_CHILD_PID)
+            os._exit(125)
+        if result not in (258,):  # WAIT_TIMEOUT
+            _PARENT_DEAD.set()
+            _kill_windows_tree(_CHILD_PID)
+            os._exit(125)
+
+
 def _install_parent_death_guard():
-    if os.name != "posix":
-        return
     expected = os.environ.pop("PCRC_SUPERVISOR_PARENT_PID", "")
     if not expected.isdigit():
         raise RuntimeError("missing supervisor parent identity")
     expected_pid = int(expected)
-    if os.getppid() != expected_pid:
-        os.kill(os.getpid(), signal.SIGTERM)
-    signal.signal(signal.SIGTERM, _parent_terminated)
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error))
-    if os.getppid() != expected_pid:
-        os.kill(os.getpid(), signal.SIGTERM)
+    if os.name == "posix":
+        if os.getppid() != expected_pid:
+            os.kill(os.getpid(), signal.SIGTERM)
+        signal.signal(signal.SIGTERM, _parent_terminated)
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        if os.getppid() != expected_pid:
+            os.kill(os.getpid(), signal.SIGTERM)
+    else:
+        from ctypes import wintypes
+        global _PARENT_HANDLE
+        kernel32 = _kernel32()
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        _PARENT_HANDLE = kernel32.OpenProcess(0x00100000, False, expected_pid)
+        if not _PARENT_HANDLE:
+            raise OSError(ctypes.get_last_error(), "Could not bind supervisor to PCRC parent process")
+        threading.Thread(target=_watch_windows_parent, daemon=True).start()
 
 
 def _forward_input(source, destination):
@@ -130,7 +155,7 @@ def _forward_input(source, destination):
 
 
 def supervise(config):
-    global _CHILD_PGID
+    global _CHILD_PGID, _CHILD_PID
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
     lock_resource = config["lock_resource"]
     with store.resource_locked_handoff(lock_resource) as lock_fd:
@@ -142,14 +167,13 @@ def supervise(config):
         launch_data = json.loads(launch.decode())
         if launch_data.get("launch") is not True or not isinstance(launch_data.get("operation_id"), str):
             return 125
+        if _PARENT_DEAD.is_set():
+            return 125
 
         options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else {"start_new_session": True})
         inherited_lock = {}
         if os.name == "posix":
-            # The child inherits the same open-file-description lock. If this
-            # supervisor is SIGKILLed, recovery still sees the lock until the
-            # command process exits (and until inherited descriptors close).
             os.set_inheritable(lock_fd, True)
             inherited_lock["pass_fds"] = (lock_fd,)
         child = subprocess.Popen(
@@ -157,7 +181,14 @@ def supervise(config):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, shell=False, **inherited_lock, **options,
         )
+        _CHILD_PID = child.pid
         _CHILD_PGID = child.pid if os.name == "posix" else None
+        if _PARENT_DEAD.is_set():
+            if os.name == "nt":
+                _kill_windows_tree(child.pid)
+            else:
+                os.killpg(child.pid, signal.SIGKILL)
+            return 125
         sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
         sys.stdout.flush()
         input_thread = threading.Thread(
@@ -176,15 +207,10 @@ def supervise(config):
             if child.poll() is None:
                 try:
                     if os.name == "nt":
-                        subprocess.run(
-                            [os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"),
-                                           "System32", "taskkill.exe"),
-                             "/PID", str(child.pid), "/T", "/F"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            timeout=5, check=False)
+                        _kill_windows_tree(child.pid)
                     else:
                         os.killpg(child.pid, signal.SIGKILL)
-                except (OSError, subprocess.TimeoutExpired):
+                except OSError:
                     child.kill()
                 try:
                     child.wait(timeout=5)
@@ -207,6 +233,14 @@ def main():
         except Exception:
             pass
         return 125
+    finally:
+        _SUPERVISOR_DONE.set()
+        if _PARENT_HANDLE and os.name == "nt":
+            from ctypes import wintypes
+            kernel32 = _kernel32()
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            kernel32.CloseHandle(wintypes.HANDLE(_PARENT_HANDLE))
 
 
 if __name__ == "__main__":
