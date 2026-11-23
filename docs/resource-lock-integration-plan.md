@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The latest fail-fast Windows/Ubuntu workflow passed on commit `7d381549`: Ubuntu resource-lock 6 passed, coordination 44 passed, development 32 passed; Windows resource-lock 5 passed, coordination 46 passed, development 31 passed. The Linux parent-death and 16-worker fork-race tests passed; Windows parent-death, nested Job Object, and direct-descendant tests passed. Production remains untouched.
+Status: resource-lock recovery, Linux descendant cleanup, Windows Job Object containment, reconciliation fencing, and task-owned command-session controls are implemented on `work/full-concurrency-upgrade`. The latest fail-fast Windows/Ubuntu workflow passed on commit `44400fcb`: Ubuntu resource-lock 6 passed, coordination 50 passed, development 32 passed; Windows resource-lock 5 passed, coordination 52 passed, development 31 passed. Linux parent-death and 16-worker fork-race tests passed; Windows parent-death, nested Job Object, and direct-descendant tests passed. Production remains untouched.
 
 ## Current behavior
 
@@ -41,7 +41,9 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented: detached child and supervisor PIDs are stored in the operation record. Successful exit marks the operation completed; a stop, crash, or nonzero exit requires review and is never replayed.
 - Implemented/tested: a direct command exiting while a background descendant keeps stdout/stderr inherited no longer blocks the supervisor waiting for pipe EOF. The supervisor observes direct-process exit independently, terminates descendants, and only then drains output and finalizes the reservation.
 - Implemented: stdin control remains available during the detached workspace reservation; ordinary workspace/file operations remain blocked.
-- Implemented: task reconciliation first probes active operation locks, refuses while an operation is live, and only archives uncertain operation records after explicit review.
+- Implemented/tested: `reconcile_operation` and task reconciliation acquire and retain every recorded OS resource lock while changing durable review state. They revalidate operation identity, task lease identity, and the complete set of uncertain browser runs after acquiring locks. A live `needs_review` operation cannot be released merely because its metadata says it is reviewable.
+- Implemented/tested: task-assigned command sessions carry their task ID. Assigned workers can read, send input to, or stop only sessions owned by their own assignment; unassigned operator controls remain available for manual recovery. Fixed-profile session launches now require the `commands` capability and record the assignment owner.
+- Implemented/tested: capability, rate-limit, and audit preflight denials are classified as `OperationNotApplied`; denied commands are recorded as failed preconditions rather than ambiguous side effects requiring review.
 - Implemented/tested: live operations remain active during recovery probes; abandoned records become needs_review; changed or malformed records fail closed.
 - Same-file and parent/child operations serialize.
 - Workspace conflicts with every file operation; UI remains exclusive.
@@ -50,8 +52,8 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - A stale lease is rejected after waiting for resource locks.
 - Multiple-resource operations acquire locks in canonical order and do not deadlock under reversed input order.
 - Process crash while an operation is registered leads to review-required recovery, never automatic replay.
-- Thread and separate-process resource-lock tests pass on Windows and POSIX. The expanded coordination suite is awaiting the latest CI run.
-- Existing coordination, privacy, command-permission, and workflow tests remain green.
+- Thread and separate-process resource-lock tests pass on Windows and POSIX. The expanded coordination suite passes on Ubuntu 22.04 and Windows Server 2022.
+- Existing coordination, privacy, command-permission, and workflow regression tests remain green in the focused CI workflow.
 
 ## Rollout boundary
 
