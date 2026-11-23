@@ -1008,6 +1008,16 @@ def test_all_workspace_read_tools_require_files_capability(pc):
         limited.close_control()
 
 
+def test_diagnostic_requires_commands_capability(pc):
+    limited = ControlCommander(pc.workspace, enabled={'files'})
+    try:
+        with pytest.raises(PermissionDenied, match='capability disabled or expired'):
+            limited.diagnostic('python_version')
+        assert limited.status()['control_enabled']
+    finally:
+        limited.close_control()
+
+
 def test_session_reads_require_live_commands_capability_but_stop_remains_available(pc):
     import time
     session = pc.start_session('disk_usage')
