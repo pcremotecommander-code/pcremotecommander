@@ -483,24 +483,48 @@ class ControlCommander(PortableCommander):
         lifetime = max(1, min(timeout_seconds, int(self.expires-time.monotonic())))
 
         def launch():
-            from .session_guard import parent_death_preexec, assign_supervisor_job, close_supervisor_job
+            from .session_guard import assign_supervisor_job, close_supervisor_job
+            store = coordinator(self).store
             lock_resource = 'session:' + uuid.uuid4().hex
-            options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
-                       if os.name == 'nt' else
-                       {'start_new_session': True, 'preexec_fn': parent_death_preexec()})
-            supervisor = subprocess.Popen(
-                [sys.executable, '-m', 'jan_mcp_commander.session_guard'],
-                cwd=self.workspace, env=child_environment, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False, **options)
+            owner_lock_resource = 'session-owner:' + uuid.uuid4().hex
+            owner_ready = threading.Event()
+            owner_release = threading.Event()
+            owner_errors = []
+
+            def hold_owner_lock():
+                try:
+                    with store.resource_locked(owner_lock_resource):
+                        owner_ready.set()
+                        owner_release.wait()
+                except BaseException as exc:
+                    owner_errors.append(exc)
+                    owner_ready.set()
+
+            threading.Thread(target=hold_owner_lock, daemon=True).start()
+            if not owner_ready.wait(10) or owner_errors:
+                owner_release.set()
+                raise PermissionDenied('Could not establish the parent-owned session reservation')
+
+            supervisor = None
             job_handle = None
             try:
+                options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+                           if os.name == 'nt' else {'start_new_session': True})
+                supervisor_environment = dict(child_environment)
+                if os.name == 'posix':
+                    supervisor_environment['PCRC_SUPERVISOR_PARENT_PID'] = str(os.getpid())
+                supervisor = subprocess.Popen(
+                    [sys.executable, '-m', 'jan_mcp_commander.session_guard'],
+                    cwd=self.workspace, env=supervisor_environment,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, shell=False, **options)
                 if os.name == 'nt':
-                    # Assign before sending launch authorization. The child
-                    # inherits this kill-on-close job from its supervisor.
+                    # The parent owns the only Job handle. Closing it on exit
+                    # kills the supervisor and every child in its process tree.
                     job_handle = assign_supervisor_job(supervisor)
                 config = {
                     'workspace': str(self.workspace),
-                    'state_dir': str(coordinator(self).store.path),
+                    'state_dir': str(store.path),
                     'lock_resource': lock_resource,
                     'argv': argv,
                 }
@@ -527,7 +551,7 @@ class ControlCommander(PortableCommander):
                 if locked != {'locked': True}:
                     raise PermissionDenied('Detached command supervisor failed to acquire its reservation')
                 operation_id = coordinator(self).register_detached_operation(
-                    lock_resource, supervisor_pid=supervisor.pid)
+                    lock_resource, owner_lock_resource, supervisor_pid=supervisor.pid)
                 supervisor.stdin.write((json.dumps({
                     'launch': True, 'operation_id': operation_id,
                 }) + '\n').encode('utf-8'))
@@ -535,17 +559,41 @@ class ControlCommander(PortableCommander):
                 ready = read_protocol_line()
                 if ready.get('ready') is not True or type(ready.get('pid')) is not int:
                     raise PermissionDenied('Detached command process failed to start')
+
                 supervisor.pcrc_child_pid = ready['pid']
+                supervisor.pcrc_supervisor_pid = supervisor.pid
                 supervisor.pcrc_job_handle = job_handle
                 supervisor.pcrc_lock_resource = lock_resource
+                supervisor.pcrc_owner_lock_resource = owner_lock_resource
+
+                def finalize_detached_operation():
+                    try:
+                        if job_handle:
+                            close_supervisor_job(job_handle)
+                        # On POSIX the child inherits the supervisor's lock
+                        # descriptor. On Windows the Job close above kills
+                        # any remaining descendants before this probe.
+                        while True:
+                            with store.try_resource_locked(lock_resource) as acquired:
+                                if acquired:
+                                    coordinator(self).finish_detached_operation(
+                                        operation_id, success=supervisor.returncode == 0)
+                                    break
+                            time.sleep(0.05)
+                    finally:
+                        owner_release.set()
+
+                supervisor.pcrc_on_exit = finalize_detached_operation
                 return supervisor
             except BaseException:
                 try:
-                    self._terminate(supervisor)
+                    if supervisor is not None:
+                        self._terminate(supervisor)
                 except Exception:
                     pass
                 if job_handle:
                     close_supervisor_job(job_handle)
+                owner_release.set()
                 raise
 
         result = self._start_owned_session('operator_command', launch,
@@ -553,23 +601,36 @@ class ControlCommander(PortableCommander):
         identifier = result['session_id']
         entry = self._sessions[identifier]
         entry['child_pid'] = entry['process'].pcrc_child_pid
-        entry['supervisor_pid'] = entry['process'].pid
+        entry['supervisor_pid'] = entry['process'].pcrc_supervisor_pid
         entry['job_handle'] = entry['process'].pcrc_job_handle
         entry['input_queue'] = queue.Queue(maxsize=4)
-
-        if entry['job_handle']:
-            def release_job_when_finished():
-                entry['done'].wait()
-                from .session_guard import close_supervisor_job
-                close_supervisor_job(entry['job_handle'])
-                entry['job_handle'] = None
-            threading.Thread(target=release_job_when_finished, daemon=True).start()
-
         threading.Thread(target=self._write_input, args=(entry,), daemon=True).start()
         threading.Thread(target=self._expire_process, args=(identifier,), daemon=True).start()
         result['pid'] = entry['child_pid']
         result['supervisor_pid'] = entry['supervisor_pid']
         return result
+
+    @staticmethod
+    def _terminate(proc):
+        if os.name == 'posix' and getattr(proc, 'pcrc_child_pid', None):
+            if proc.poll() is None:
+                try:
+                    proc.send_signal(signal.SIGTERM)
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            try:
+                os.killpg(proc.pcrc_child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            return
+        PortableCommander._terminate(proc)
 
     @staticmethod
     def _write_input(entry):
