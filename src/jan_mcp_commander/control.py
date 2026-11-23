@@ -526,7 +526,7 @@ class ControlCommander(PortableCommander):
                     [sys.executable, '-m', 'jan_mcp_commander.session_guard'],
                     cwd=self.workspace, env=supervisor_environment,
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, shell=False,
+                    stderr=subprocess.PIPE, shell=False,
                     startupinfo=startupinfo, **options)
                 config = {
                     'workspace': str(self.workspace),
@@ -547,7 +547,14 @@ class ControlCommander(PortableCommander):
                     if not ready.wait(15):
                         raise PermissionDenied('Detached command supervisor did not acquire its reservation in time')
                     if not result_box[0]:
-                        raise PermissionDenied('Detached command supervisor exited before acquiring its reservation')
+                        diagnostic = b''
+                        if supervisor.poll() is not None and supervisor.stderr is not None:
+                            diagnostic = supervisor.stderr.read(4096)
+                        detail = diagnostic.decode('utf-8', 'replace').strip()
+                        safe_detail = detail if detail.startswith('{"supervisor_error":') else ''
+                        suffix = f' ({safe_detail})' if safe_detail else ''
+                        raise PermissionDenied(
+                            'Detached command supervisor exited before acquiring its reservation' + suffix)
                     try:
                         return json.loads(result_box[0].decode('utf-8'))
                     except (UnicodeError, ValueError) as exc:
