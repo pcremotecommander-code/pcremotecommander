@@ -30,6 +30,10 @@ npx --yes pcrc setup
 
 Keep the terminal open while your computer is connected. To stop the local agent, press `Ctrl+C`. Run the same setup command to reconnect.
 
+For Linux/macOS, the launcher retrieves the version-matched installer from:
+[install-posix-beta49.sh](https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta49.sh).
+The launcher verifies its SHA-256 before executing it.
+
 ## What PCRC connects
 
 - **Files and documents** — inspect approved workspace files and perform reviewed changes.
