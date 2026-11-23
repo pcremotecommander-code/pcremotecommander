@@ -141,9 +141,29 @@ def _install_parent_death_guard():
         globals()["_PARENT_WATCHER"] = watcher
 
 
-def _forward_input(source, destination):
+def _forward_input(source, destination, child_done):
     try:
-        while True:
+        while not child_done.is_set():
+            if os.name == "posix":
+                import select
+                if not select.select([source], [], [], 0.1)[0]:
+                    continue
+            else:
+                import msvcrt
+                from ctypes import wintypes
+                kernel32 = _kernel32()
+                kernel32.PeekNamedPipe.argtypes = [
+                    wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                    ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+                kernel32.PeekNamedPipe.restype = wintypes.BOOL
+                available = wintypes.DWORD()
+                handle = msvcrt.get_osfhandle(source.fileno())
+                if not kernel32.PeekNamedPipe(wintypes.HANDLE(handle), None, 0,
+                                               None, ctypes.byref(available), None):
+                    break
+                if not available.value:
+                    child_done.wait(0.1)
+                    continue
             packet = source.read1(4096)
             if not packet:
                 break
@@ -195,9 +215,10 @@ def supervise(config):
             return 125
         sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
         sys.stdout.flush()
+        child_done = threading.Event()
         input_thread = threading.Thread(
             target=_forward_input,
-            args=(sys.stdin.buffer, child.stdin), daemon=True)
+            args=(sys.stdin.buffer, child.stdin, child_done), daemon=True)
         input_thread.start()
         try:
             while True:
@@ -208,6 +229,8 @@ def supervise(config):
                 sys.stdout.buffer.flush()
             return child.wait()
         finally:
+            child_done.set()
+            input_thread.join(timeout=1)
             if child.poll() is None:
                 try:
                     if os.name == "nt":
