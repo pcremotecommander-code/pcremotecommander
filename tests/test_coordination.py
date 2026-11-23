@@ -245,7 +245,10 @@ def test_running_process_must_stop_before_handoff_or_new_assignments(pc):
         assert waiting['status']=='waiting'
     finally:
         pc.stop_session(result['session_id'])
-    assert store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'], status='completed')['status'] == 'completed'
+    # A forcibly stopped command may have made partial changes. Reconcile
+    # its uncertain operation explicitly instead of treating stop as success.
+    reviewed = store.task('reconcile', task_id=lease['id'], reviewed=True)
+    assert reviewed['status'] == 'queued'
     assert store.task('renew',task_id=waiting['id'],lease_token=waiting['lease_token'])['status']=='active'
 
 
