@@ -49,6 +49,32 @@ def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
     assert store.task('claim', **target)['status'] == 'active'
 
 
+
+def test_task_lease_survives_longer_interaction_and_slides_on_assigned_work(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    lease = claim(store, 'Long browser acceptance', ['ui'])
+    assert lease['expires_at'] == 1000 + 600
+
+    # A real acceptance test can take longer than the former 120-second TTL.
+    now[0] += 121
+    renewed = store.task('renew', task_id=lease['id'], lease_token=lease['lease_token'])
+    assert renewed['status'] == 'active'
+    assert renewed['expires_at'] == now[0] + 600
+
+    # Every successful assigned operation extends the idle window.
+    now[0] += 121
+    marker = assignment.set((lease['id'], lease['lease_token']))
+    try:
+        with store.guard(['ui']):
+            pass
+    finally:
+        assignment.reset(marker)
+    current = store.load()['tasks'][lease['id']]
+    assert current['status'] == 'active'
+    assert current['expires_at'] == now[0] + 600
+
+
 def test_eight_assignments_and_capacity_queue_promote_after_release(pc):
     store=coordinator(pc)
     active=[claim(store,str(i),[f'file:{i}.txt']) for i in range(8)]
