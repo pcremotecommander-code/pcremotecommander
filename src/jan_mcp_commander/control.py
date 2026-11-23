@@ -11,6 +11,7 @@ import os
 import queue
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import threading
