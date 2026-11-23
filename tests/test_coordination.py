@@ -875,3 +875,74 @@ def test_supervisor_crash_keeps_child_lock_until_child_exits(pc):
         record = store.load()['operations'][record_id]
     assert record['state'] == 'needs_review'
     assert 'never replay' in record['note'].lower()
+
+
+def _cross_process_recovery_worker(state_dir, workspace, start, connection):
+    from types import SimpleNamespace
+    from jan_mcp_commander.coordination import Coordination
+
+    commander = SimpleNamespace(
+        _store=SimpleNamespace(path=Path(state_dir)),
+        workspace=Path(workspace),
+    )
+    try:
+        start.wait(timeout=15)
+        connection.send(Coordination(commander).recover_operations())
+    except BaseException as exc:
+        connection.send({'worker_error': type(exc).__name__, 'message': str(exc)})
+    finally:
+        connection.close()
+
+
+def test_two_process_recovery_workers_never_double_recover_one_operation(pc):
+    import multiprocessing
+
+    store = coordinator(pc)
+    operation_id = 'cross-process-recovery-race'
+    with store.store.locked():
+        data = store.load()
+        data['operations'][operation_id] = {
+            'id': operation_id,
+            'state': 'active',
+            'resources': ['file:cross-process-race.txt'],
+            'owner': {'pid': 999999, 'thread': 1},
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    context = multiprocessing.get_context('spawn')
+    start = context.Event()
+    workers = []
+    receivers = []
+    try:
+        for _ in range(2):
+            receive, send = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_cross_process_recovery_worker,
+                args=(str(pc._store.path), str(pc.workspace), start, send),
+            )
+            process.start()
+            send.close()
+            workers.append(process)
+            receivers.append(receive)
+
+        start.set()
+        results = []
+        for receive in receivers:
+            assert receive.poll(20), 'recovery worker did not return'
+            results.append(receive.recv())
+        for process in workers:
+            process.join(20)
+            assert process.exitcode == 0
+        assert all('worker_error' not in result for result in results), results
+        assert sum(result['recovered'] == [operation_id] for result in results) == 1
+        with store.store.locked():
+            assert store.load()['operations'][operation_id]['state'] == 'needs_review'
+    finally:
+        start.set()
+        for process in workers:
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+        for receive in receivers:
+            receive.close()
