@@ -237,8 +237,14 @@ class Coordination:
                 yield
             finally:
                 if own is not None:
-                    own['expires_at'] = self.clock() + LEASE_SECONDS
-                    self.save(data)
+                    # The guarded operation may have saved workflow/run state.
+                    # Reload it before sliding the lease, otherwise this stale
+                    # pre-operation snapshot would overwrite those changes.
+                    latest = self.load()
+                    latest_own = latest['tasks'].get(own['id'])
+                    if latest_own is not None and latest_own.get('lease_token') == current[1] and latest_own['status'] == 'active':
+                        latest_own['expires_at'] = self.clock() + LEASE_SECONDS
+                        self.save(latest)
                 self.depth.reset(marker)
 
 
