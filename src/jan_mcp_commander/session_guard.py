@@ -15,6 +15,9 @@ from .security import PrivateStore
 _CHILD_PGID = None
 _CHILD_PID = None
 _PARENT_DEAD = threading.Event()
+_PARENT_HANDLE = None
+_SUPERVISOR_DONE = threading.Event()
+_PARENT_WATCHER = None
 
 
 def _kernel32():
@@ -91,6 +94,23 @@ def _parent_terminated(signum, frame):
     os._exit(125)
 
 
+def _watch_windows_parent():
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    while not _SUPERVISOR_DONE.is_set():
+        result = kernel32.WaitForSingleObject(wintypes.HANDLE(_PARENT_HANDLE), 250)
+        if result == 0:  # PCRC parent process exited.
+            _PARENT_DEAD.set()
+            _kill_windows_tree(_CHILD_PID)
+            os._exit(125)
+        if result not in (258,):  # WAIT_TIMEOUT
+            _PARENT_DEAD.set()
+            _kill_windows_tree(_CHILD_PID)
+            os._exit(125)
+
+
 def _install_parent_death_guard():
     expected = os.environ.pop("PCRC_SUPERVISOR_PARENT_PID", "")
     if not expected.isdigit():
@@ -107,9 +127,18 @@ def _install_parent_death_guard():
         if os.getppid() != expected_pid:
             os.kill(os.getpid(), signal.SIGTERM)
     else:
-        # Windows recovery is fenced by the supervisor lock and the parent-owned
-        # lock. If the parent disappears, the supervisor remains alive and
-        # retains the reservation until the child exits.
+        from ctypes import wintypes
+        global _PARENT_HANDLE
+        kernel32 = _kernel32()
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        opened = kernel32.OpenProcess(0x00100000, False, expected_pid)
+        _PARENT_HANDLE = opened if isinstance(opened, int) else getattr(opened, "value", None)
+        if not _PARENT_HANDLE:
+            raise OSError(ctypes.get_last_error(), "Could not bind supervisor to PCRC parent process")
+        watcher = threading.Thread(target=_watch_windows_parent, daemon=True)
+        watcher.start()
+        globals()["_PARENT_WATCHER"] = watcher
 
 
 def _forward_input(source, destination, child_done):
@@ -231,7 +260,16 @@ def main():
         except Exception:
             pass
         return 125
-
+    finally:
+        _SUPERVISOR_DONE.set()
+        if _PARENT_WATCHER is not None:
+            _PARENT_WATCHER.join(timeout=1)
+        if _PARENT_HANDLE and os.name == "nt":
+            from ctypes import wintypes
+            kernel32 = _kernel32()
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            kernel32.CloseHandle(wintypes.HANDLE(_PARENT_HANDLE))
 
 
 if __name__ == "__main__":
