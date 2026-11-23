@@ -13,8 +13,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .security import PrivateStore
 
 
-def _parent_death(death_signal=signal.SIGKILL):
+def _parent_death(death_signal=None):
     """Return a pre-exec hook that kills this child if its parent disappears."""
+    if death_signal is None:
+        death_signal = getattr(signal, 'SIGKILL', signal.SIGTERM)
     import ctypes
     import ctypes.util
     libc = ctypes.CDLL(ctypes.util.find_library("c") or None, use_errno=True)
