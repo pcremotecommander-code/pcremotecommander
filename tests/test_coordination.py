@@ -691,3 +691,53 @@ def test_operation_registration_and_task_claim_are_mutually_exclusive(pc):
                                   lease_token=claimed['lease_token'])
             assert promoted['status'] == 'active'
     release.set()
+
+
+
+def test_orphaned_operation_requires_explicit_review_to_release(pc):
+    store = coordinator(pc)
+    operation_id = 'orphaned-operation'
+    with store.store.locked():
+        data = store.load()
+        data['operations'][operation_id] = {
+            'id': operation_id,
+            'state': 'active',
+            'resources': ['file:orphaned-resource.txt'],
+            'owner': {'pid': 999999, 'thread': 9},
+            'task_id': None,
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    with pytest.raises(CoordinationError, match='explicitly confirm'):
+        store.task('reconcile_operation', operation_id=operation_id, reviewed=False)
+
+    result = store.task('reconcile_operation', operation_id=operation_id, reviewed=True)
+    assert result == {'operation_id': operation_id,
+                      'state': 'abandoned_after_review', 'task_id': None}
+    with store.store.locked():
+        record = store.load()['operations'][operation_id]
+    assert record['state'] == 'abandoned_after_review'
+    assert record['reviewed_at'] > 0
+
+
+def test_orphaned_operation_cannot_be_reconciled_while_resource_lock_is_live(pc):
+    store = coordinator(pc)
+    operation_id = 'live-orphaned-operation'
+    with store.store.locked():
+        data = store.load()
+        data['operations'][operation_id] = {
+            'id': operation_id,
+            'state': 'active',
+            'resources': ['file:live-orphaned-resource.txt'],
+            'owner': {'pid': 999999, 'thread': 10},
+            'task_id': None,
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    with store.store.resource_locked('file:live-orphaned-resource.txt'):
+        with pytest.raises(CoordinationError, match='not in a reviewable state'):
+            store.task('reconcile_operation', operation_id=operation_id, reviewed=True)
+        with store.store.locked():
+            assert store.load()['operations'][operation_id]['state'] == 'active'
