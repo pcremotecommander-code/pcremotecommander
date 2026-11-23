@@ -797,15 +797,17 @@ def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
         'input_queue': input_queue,
         'input_closed': False,
     }
+    try:
+        with pytest.raises(CoordinationError, match='owned command is still running'):
+            with store.guard(['file:while-command-runs.txt']):
+                pytest.fail('workspace operation entered during live command')
 
-    with pytest.raises(CoordinationError, match='owned command is still running'):
-        with store.guard(['file:while-command-runs.txt']):
-            pytest.fail('workspace operation entered during live command')
+        queued = pc.process_input('live-command', 'continue')
+        assert queued == {'queued': True, 'delivery_verified': False}
+        assert input_queue.get_nowait() == b'continue\\n'
 
-    queued = pc.process_input('live-command', 'continue')
-    assert queued == {'queued': True, 'delivery_verified': False}
-    assert input_queue.get_nowait() == b'continue\n'
-
-    done.set()
-    with store.guard(['file:after-command.txt']):
-        pass
+        done.set()
+        with store.guard(['file:after-command.txt']):
+            pass
+    finally:
+        pc._sessions.pop('live-command', None)
