@@ -66,3 +66,5 @@ jobs:
 # Re-run cross-platform recovery coverage for the queued-operation recovery changes.
 
 # Include task-owned session-list isolation in the Windows and Ubuntu regression run.
+
+# Re-run recovery tests after correcting the preview setup in the queued-apply test.
