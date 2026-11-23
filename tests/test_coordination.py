@@ -387,7 +387,8 @@ def test_operation_recovery_keeps_live_resource_operation_active(pc):
         store.save(data)
 
     with store.store.resource_locked('file:live-child.txt'):
-        result = store.recover_operations()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(store.recover_operations).result(timeout=5)
     assert result == {'recovered': [], 'busy': ['operation-live'], 'changed': []}
     with store.store.locked():
         assert store.load()['operations']['operation-live']['state'] == 'active'
