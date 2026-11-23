@@ -575,7 +575,16 @@ class ControlCommander(PortableCommander):
                         # any remaining descendants before this probe.
                         while True:
                             with store.try_resource_locked(lock_resource) as acquired:
-                                if acquired:
+                                group_alive = False
+                                if acquired and os.name == 'posix':
+                                    try:
+                                        os.killpg(supervisor.pcrc_child_pid, 0)
+                                        group_alive = True
+                                    except ProcessLookupError:
+                                        group_alive = False
+                                    except PermissionError:
+                                        group_alive = True
+                                if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
                                         operation_id, success=supervisor.returncode == 0)
                                     break
