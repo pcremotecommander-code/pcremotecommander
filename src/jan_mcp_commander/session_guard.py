@@ -468,7 +468,6 @@ def _forward_input(source, destination, child_done):
 
 def supervise(config):
     global _CHILD_PGID, _CHILD_PID
-    _enable_linux_subreaper()
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
     lock_resource = config["lock_resource"]
     with store.resource_locked_handoff(lock_resource) as lock_fd:
@@ -556,6 +555,9 @@ def supervise(config):
 
 def main():
     try:
+        # Enable subreaper mode before installing the parent-death signal so
+        # there is no startup window in which escaped orphans reparent to init.
+        _enable_linux_subreaper()
         _install_parent_death_guard()
         config_line = sys.stdin.buffer.readline(1024 * 1024)
         if not config_line:
