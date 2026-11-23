@@ -33,6 +33,7 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented: task handoff refuses to release a lease with active or review-required operation records.
 - Implemented: orphaned operations without a task can be released only through explicit `reconcile_operation` review after the same two-phase OS-lock probe.
 - Implemented: development subprocess execution retains its workspace lock for the entire child-process lifetime; synchronous shell commands and browser teaching workflows are coordinated.
+- Implemented: a live owned command session blocks new workspace/file operations until it exits; its own stdin control remains available.
 - Implemented: task reconciliation first probes active operation locks, refuses while an operation is live, and only archives uncertain operation records after explicit review.
 - Implemented/tested: live operations remain active during recovery probes; abandoned records become needs_review; changed or malformed records fail closed.
 - Same-file and parent/child operations serialize.
