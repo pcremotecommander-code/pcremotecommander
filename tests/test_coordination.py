@@ -1008,6 +1008,18 @@ def test_all_workspace_read_tools_require_files_capability(pc):
         limited.close_control()
 
 
+def test_session_reads_require_live_commands_capability_but_stop_remains_available(pc):
+    import time
+    session = pc.start_session('disk_usage')
+    pc.expires = time.monotonic() - 1
+    with pytest.raises(PermissionDenied, match='capability disabled or expired'):
+        pc.session_output(session['session_id'])
+    with pytest.raises(PermissionDenied, match='capability disabled or expired'):
+        pc.list_sessions()
+    # Emergency cleanup remains possible after the grant expires.
+    assert pc.stop_session(session['session_id'])['stopped'] == session['session_id']
+
+
 def test_workspace_content_search_cannot_escape_file_scoped_task(pc):
     store = coordinator(pc)
     task = claim(store, 'Narrow file task', ['file:allowed.txt'])
