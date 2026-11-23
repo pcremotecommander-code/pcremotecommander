@@ -447,3 +447,62 @@ def test_operation_recovery_fails_closed_on_malformed_resource_metadata(pc):
     assert result == {'recovered': [], 'busy': [], 'changed': ['operation-malformed']}
     with store.store.locked():
         assert store.load()['operations']['operation-malformed']['state'] == 'active'
+
+
+
+def test_guard_registers_operation_and_keeps_claim_waiting_until_release(pc):
+    store = coordinator(pc)
+    with store.guard(['file:guarded.txt']):
+        with store.store.locked():
+            data = store.load()
+            active = [r for r in data['operations'].values() if r['state'] == 'active']
+        assert len(active) == 1
+        assert active[0]['resources'] == ['file:guarded.txt']
+
+        task = store.task('create', title='wait for guarded resource')
+        waiting = store.task('claim', task_id=task['id'], agent='worker',
+                             resources=['file:guarded.txt'])
+        assert waiting['status'] == 'waiting'
+
+    with store.store.locked():
+        data = store.load()
+        completed = [r for r in data['operations'].values()
+                     if r['id'] == active[0]['id']]
+    assert len(completed) == 1
+    assert completed[0]['state'] == 'completed'
+    promoted = store.task('renew', task_id=waiting['id'],
+                          lease_token=waiting['lease_token'])
+    assert promoted['status'] == 'active'
+
+
+def test_guard_allows_independent_resources_to_overlap(pc):
+    store = coordinator(pc)
+    entered = []
+    from threading import Event, Lock
+    first_entered = Event()
+    release_first = Event()
+    second_entered = Event()
+    guard = Lock()
+
+    def first():
+        with store.guard(['file:first.txt']):
+            with guard:
+                entered.append('first')
+            first_entered.set()
+            assert release_first.wait(5)
+
+    def second():
+        assert first_entered.wait(5)
+        with store.guard(['file:second.txt']):
+            with guard:
+                entered.append('second')
+            second_entered.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one = pool.submit(first)
+        two = pool.submit(second)
+        assert second_entered.wait(5), 'independent operation was serialized'
+        release_first.set()
+        one.result(timeout=5)
+        two.result(timeout=5)
+    assert entered == ['first', 'second']
