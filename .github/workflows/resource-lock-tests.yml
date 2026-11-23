@@ -12,7 +12,9 @@ on:
   pull_request:
     paths:
       - "src/jan_mcp_commander/security.py"
+      - "src/jan_mcp_commander/coordination.py"
       - "tests/test_security.py"
+      - "tests/test_coordination.py"
       - ".github/workflows/resource-lock-tests.yml"
   workflow_dispatch:
 
