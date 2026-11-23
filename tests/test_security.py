@@ -286,3 +286,27 @@ def test_private_store_try_resource_lock_reports_held_then_available(cmd):
             assert pool.submit(probe).result(timeout=3) is False
     with store.try_resource_locked('file:recovery-probe.txt') as acquired:
         assert acquired is True
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX inherited flock descriptor')
+def test_private_store_resource_lock_handoff_survives_supervisor_exit(cmd):
+    import subprocess
+    import sys
+    store = cmd._store
+    resource_id = 'session:inherited-lock-test'
+    with store.resource_locked_handoff(resource_id) as lock_fd:
+        os.set_inheritable(lock_fd, True)
+        child = subprocess.Popen(
+            [sys.executable, '-c', 'import time; time.sleep(1)'],
+            pass_fds=(lock_fd,),
+        )
+    try:
+        with store.try_resource_locked(resource_id) as acquired:
+            assert acquired is False, 'Inherited child descriptor did not retain the OS lock'
+        assert child.wait(timeout=5) == 0
+        with store.try_resource_locked(resource_id) as acquired:
+            assert acquired is True, 'Inherited lock did not release after child exit'
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=2)
