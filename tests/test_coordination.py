@@ -819,8 +819,9 @@ def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
 def test_detached_command_reservation_survives_request_process_scope(pc):
     import time
     store = coordinator(pc)
-    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(2)'],
-                              timeout_seconds=10)
+    result = pc.start_program(
+        sys.executable, ['-c', 'import sys,time; sys.stdin.readline(); time.sleep(1)'],
+        timeout_seconds=10)
     entry = pc._sessions[result['session_id']]
     assert result['pid'] == entry['child_pid']
     assert result['supervisor_pid'] == entry['supervisor_pid']
