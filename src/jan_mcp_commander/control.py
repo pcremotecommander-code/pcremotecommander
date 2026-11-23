@@ -537,6 +537,7 @@ class ControlCommander(PortableCommander):
         if entry and not entry['done'].wait(remaining):
             self._terminate(entry['process'])
 
+    @coordinated('workspace')
     def run_command(self, command, shell='system', timeout_seconds=10):
         if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 15:
             raise PermissionDenied('Synchronous timeout must be 1..15 seconds; use start_process for longer commands')
@@ -701,6 +702,7 @@ class ControlCommander(PortableCommander):
                 finally:
                     driver.stop()
 
+    @coordinated('ui')
     def browser_workflow(self, action, options=None):
         self._check('browser')
         from .browser_teaching import workflow_action
