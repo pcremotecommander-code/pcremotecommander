@@ -36,7 +36,7 @@ def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     holder = claim(store, 'Previous workspace operation', ['workspace'])
-    now[0] += 121
+    now[0] += 601
     task = store.task('create', title='Open approved app')
     target = dict(task_id=task['id'], agent='Interactive', resources=['ui'], wait=False)
     with pytest.raises(CoordinationError) as error:
@@ -57,13 +57,13 @@ def test_task_lease_survives_longer_interaction_and_slides_on_assigned_work(pc):
     assert lease['expires_at'] == 1000 + 600
 
     # A real acceptance test can take longer than the former 120-second TTL.
-    now[0] += 121
+    now[0] += 601
     renewed = store.task('renew', task_id=lease['id'], lease_token=lease['lease_token'])
     assert renewed['status'] == 'active'
     assert renewed['expires_at'] == now[0] + 600
 
     # Every successful assigned operation extends the idle window.
-    now[0] += 121
+    now[0] += 601
     marker = assignment.set((lease['id'], lease['lease_token']))
     try:
         with store.guard(['ui']):
@@ -116,7 +116,7 @@ def test_uncertain_owner_blocks_queue_until_review_and_old_token_stays_fenced(pc
     second=claim(store,'second',['file:shared.txt'])
     now[0]=1090
     assert store.task('renew',task_id=second['id'],lease_token=second['lease_token'])['status']=='waiting'
-    now[0]=1121
+    now[0]=1621
     state={t['id']:t for t in store.task('list')['tasks']}
     assert state[first['id']]['status']=='needs_review'
     assert state[second['id']]['status']=='waiting'
@@ -130,7 +130,7 @@ def test_waiting_expiry_and_cancellation_never_grant_stale_token_access(pc):
     first=claim(store,'first',['file:shared.txt'])
     expired=claim(store,'expired',['file:shared.txt'])
     now[0]=1100;store.task('renew',task_id=first['id'],lease_token=first['lease_token'])
-    now[0]=1121
+    now[0]=1621
     assert next(t for t in store.task('list')['tasks'] if t['id']==expired['id'])['status']=='queued'
     with pytest.raises(CoordinationError):store.task('renew',task_id=expired['id'],lease_token=expired['lease_token'])
     waiting=claim(store,'cancelled',['file:shared.txt'])
