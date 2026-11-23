@@ -504,7 +504,7 @@ class ControlCommander(PortableCommander):
                     'lock_resource': lock_resource,
                     'argv': argv,
                 }
-                supervisor.stdin.write((json.dumps(config) + '\\n').encode('utf-8'))
+                supervisor.stdin.write((json.dumps(config) + '\n').encode('utf-8'))
                 supervisor.stdin.flush()
 
                 def read_protocol_line():
@@ -530,7 +530,7 @@ class ControlCommander(PortableCommander):
                     lock_resource, supervisor_pid=supervisor.pid)
                 supervisor.stdin.write((json.dumps({
                     'launch': True, 'operation_id': operation_id,
-                }) + '\\n').encode('utf-8'))
+                }) + '\n').encode('utf-8'))
                 supervisor.stdin.flush()
                 ready = read_protocol_line()
                 if ready.get('ready') is not True or type(ready.get('pid')) is not int:
