@@ -741,3 +741,44 @@ def test_orphaned_operation_cannot_be_reconciled_while_resource_lock_is_live(pc)
             store.task('reconcile_operation', operation_id=operation_id, reviewed=True)
         with store.store.locked():
             assert store.load()['operations'][operation_id]['state'] == 'active'
+
+
+
+def test_synchronous_command_keeps_outer_workspace_operation_scope(pc, monkeypatch):
+    store = coordinator(pc)
+    done = __import__('threading').Event()
+    done.set()
+    pc._sessions['fake-session'] = {'profile': 'operator_command', 'done': done}
+    observed = {}
+
+    def fake_start_process(command, shell, timeout_seconds):
+        observed['scope'] = store.depth.get()
+        return {'session_id': 'fake-session'}
+
+    monkeypatch.setattr(pc, 'start_process', fake_start_process)
+    monkeypatch.setattr(pc, 'session_output', lambda session_id: {'exit_code': 0})
+    monkeypatch.setattr(pc, 'stop_session', lambda session_id: {'stopped': session_id})
+
+    result = pc.run_command('true')
+    assert result['exit_code'] == 0
+    assert observed['scope'] == ('workspace',)
+    with store.store.locked():
+        records = [r for r in store.load()['operations'].values()
+                   if r.get('resources') == ['workspace']]
+    assert records[-1]['state'] == 'completed'
+
+
+def test_browser_teaching_runs_inside_ui_operation_scope(pc, monkeypatch):
+    store = coordinator(pc)
+    from jan_mcp_commander import browser_teaching
+
+    def fake_workflow(commander, action, options):
+        return {'scope': coordinator(commander).depth.get(), 'action': action}
+
+    monkeypatch.setattr(browser_teaching, 'workflow_action', fake_workflow)
+    result = pc.browser_workflow('inspect', {})
+    assert result == {'scope': ('ui',), 'action': 'inspect'}
+    with store.store.locked():
+        records = [r for r in store.load()['operations'].values()
+                   if r.get('resources') == ['ui']]
+    assert records[-1]['state'] == 'completed'
