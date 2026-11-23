@@ -844,7 +844,7 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
         assert entry['done'].wait(10)
         with coordinator(other).store.locked():
             completed = coordinator(other).load()['operations'][records[0]['id']]
-        assert completed['state'] == 'completed', completed
+        assert completed['state'] == 'completed', (completed.get('note'), entry['process'].returncode, getattr(entry['process'], 'pcrc_terminated', False), entry.get('callback_error'))
         with coordinator(other).guard(['file:after-child-exits.txt']):
             pass
     finally:
