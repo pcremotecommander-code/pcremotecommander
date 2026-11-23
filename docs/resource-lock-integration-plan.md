@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The fail-fast Windows/Ubuntu workflow passed on commit `b080cd6`: Ubuntu resource-lock 6 passed, coordination 42 passed, development 32 passed; Windows resource-lock 5 passed, coordination 44 passed, development 31 passed. The Linux parent-death test and Windows Job Object direct-descendant and parent-death tests passed on their respective platforms. Production remains untouched.
+Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The latest fail-fast Windows/Ubuntu workflow passed on commit `7d381549`: Ubuntu resource-lock 6 passed, coordination 44 passed, development 32 passed; Windows resource-lock 5 passed, coordination 46 passed, development 31 passed. The Linux parent-death and 16-worker fork-race tests passed; Windows parent-death, nested Job Object, and direct-descendant tests passed. Production remains untouched.
 
 ## Current behavior
 
@@ -36,9 +36,10 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented: detached `operator_command` sessions receive a durable operation record covering `workspace`, plus separate supervisor and parent-owner lock resources.
 - Implemented and targeted CI passed on Linux: subreaper mode is enabled before installing the parent-death signal handler. If the PCRC parent dies, the supervisor kills and reaps all descendants, including daemonized descendants that create a new session and close inherited descriptors, before exiting and releasing its reservation. Process identities are checked using `/proc` start times and pidfds where available. Regression coverage for normal completion and abrupt parent death passed on Ubuntu 22.04.
 - Other POSIX platforms still rely on process-group cleanup and do not receive the Linux subreaper guarantee; detached-command containment must be described as platform-dependent.
-- Implemented and targeted CI passed on Windows Server 2022: PCRC creates an inheritable Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, passes only that handle to the supervisor, creates the command process suspended, assigns it to the Job Object before resuming its primary thread, and retains handles in both the PCRC parent and supervisor. No breakaway flags are enabled. The supervisor terminates remaining job members after the direct command exits; the parent also terminates the job if the supervisor exits unexpectedly. Tests verified termination of a live grandchild after direct-command exit and after abrupt PCRC parent death.
+- Implemented and targeted CI passed on Windows Server 2022: PCRC creates an inheritable Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, passes only that handle to the supervisor, creates the command process suspended, assigns it to the Job Object before resuming its primary thread, and retains handles in both the PCRC parent and supervisor. No breakaway flags are enabled. Nested Job Object compatibility was tested by running PCRC inside an existing parent Job Object. Both supervisor and parent finalizer terminate remaining job members and wait until the Job Object reports zero active processes before releasing their reservations. Tests verified termination of live descendants after direct-command exit, supervisor failure, and abrupt PCRC parent death.
 - Implemented: a parent-owned lock remains held until supervisor cleanup and operation finalization complete. Recovery probes both lock resources and cannot mistake a helper crash for a completed command.
 - Implemented: detached child and supervisor PIDs are stored in the operation record. Successful exit marks the operation completed; a stop, crash, or nonzero exit requires review and is never replayed.
+- Implemented/tested: a direct command exiting while a background descendant keeps stdout/stderr inherited no longer blocks the supervisor waiting for pipe EOF. The supervisor observes direct-process exit independently, terminates descendants, and only then drains output and finalizes the reservation.
 - Implemented: stdin control remains available during the detached workspace reservation; ordinary workspace/file operations remain blocked.
 - Implemented: task reconciliation first probes active operation locks, refuses while an operation is live, and only archives uncertain operation records after explicit review.
 - Implemented/tested: live operations remain active during recovery probes; abandoned records become needs_review; changed or malformed records fail closed.
@@ -59,8 +60,8 @@ Implement and test only on `work/full-concurrency-upgrade`. Do not merge, deploy
 
 ## Remaining work
 
-- Continue testing nested-job compatibility and repeated fork races on supported Linux/Windows versions. The Job Object and Linux subreaper provide process-tree containment, not a general OS sandbox.
+- Continue repeated fork-race and nested-job testing on additional supported Windows/Linux versions and under heavier process load. The Job Object and Linux subreaper provide process-tree containment, not a general OS sandbox.
 - Other POSIX platforms still rely on process-group cleanup and do not receive the Linux subreaper guarantee; detached-command containment is platform-dependent.
 - Keep the operator-command feature explicitly documented as not being an OS sandbox; process containment does not replace filesystem, network, or privilege isolation.
-- Complete the latest Windows and POSIX CI runs and resolve any platform-specific failures before declaring detached-command recovery complete.
+- Repeat the fail-fast regression workflow after future changes; the current passing suites are focused resource/recovery coverage, not a claim that every repository test suite or every Windows release has been verified.
 - Expand the operation record schema to cover any future asynchronous mutator that can outlive its request thread.
