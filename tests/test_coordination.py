@@ -862,7 +862,7 @@ def test_supervisor_crash_keeps_child_lock_until_child_exits(pc):
                          if value.get('kind') == 'detached_command'
                          and value.get('state') == 'active')
     # Kill only the supervisor. On POSIX the child inherited the OS lock;
-    # on Windows the parent-owned Job Object is closed by the session finalizer.
+    # on Windows the session finalizer uses the current process-tree cleanup path.
     entry['process'].kill()
     entry['process'].wait(timeout=10)
     first_probe = store.recover_operations()
@@ -875,6 +875,45 @@ def test_supervisor_crash_keeps_child_lock_until_child_exits(pc):
         record = store.load()['operations'][record_id]
     assert record['state'] == 'needs_review'
     assert 'never replay' in record['note'].lower()
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='Linux subreaper descendant containment')
+def test_detached_grandchild_is_terminated_before_workspace_reservation_releases(pc, tmp_path):
+    import os
+    import time
+
+    store = coordinator(pc)
+    pid_file = tmp_path / 'escaped-grandchild.pid'
+    grandchild = (
+        "import time; "
+        "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
+        "time.sleep(30)"
+    )
+    parent = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
+        "start_new_session=True, close_fds=True, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "time.sleep(0.3)"
+    )
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=10)
+    entry = pc._sessions[result['session_id']]
+    assert entry['done'].wait(10)
+    assert pid_file.exists(), 'detached grandchild did not start'
+    pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail('escaped grandchild survived supervisor cleanup')
+    with store.store.locked():
+        records = [record for record in store.load()['operations'].values()
+                   if record.get('kind') == 'detached_command']
+    assert records[-1]['state'] == 'needs_review'
 
 
 def _cross_process_recovery_worker(state_dir, workspace, start, connection):
