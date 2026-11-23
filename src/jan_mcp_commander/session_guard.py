@@ -133,7 +133,7 @@ def supervise(config):
     global _CHILD_PGID
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
     lock_resource = config["lock_resource"]
-    with store.resource_locked(lock_resource) as lock_fd:
+    with store.resource_locked_handoff(lock_resource) as lock_fd:
         sys.stdout.write(json.dumps({"locked": True}) + "\n")
         sys.stdout.flush()
         launch = sys.stdin.buffer.readline(4096)
