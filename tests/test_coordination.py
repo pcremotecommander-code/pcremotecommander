@@ -977,6 +977,7 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
 
     store = coordinator(pc)
     pid_file = tmp_path / 'job-descendant.pid'
+    release_file = tmp_path / 'release-parent-command'
     grandchild = (
         "import time; "
         "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
@@ -986,15 +987,22 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
         "while not os.path.exists(" + repr(str(pid_file)) +
         ") and time.monotonic()<deadline: time.sleep(0.01)"
     )
+    wait_for_release = (
+        "while not os.path.exists(" + repr(str(release_file)) +
+        ") and time.monotonic()<deadline: time.sleep(0.01)"
+    )
     parent = (
         "import subprocess,sys,time,os; "
         "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
         "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-        "deadline=time.monotonic()+5; exec(" + repr(wait_for_grandchild) + ")"
+        "deadline=time.monotonic()+10; exec(" + repr(wait_for_grandchild) + "); "
+        "deadline=time.monotonic()+10; exec(" + repr(wait_for_release) + ")"
     )
-    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=10)
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=30)
     entry = pc._sessions[result['session_id']]
-    assert entry['done'].wait(15)
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert pid_file.exists(), 'Job Object descendant did not start'
     pid = int(pid_file.read_text())
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -1004,54 +1012,19 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
     kernel32.WaitForSingleObject.restype = ctypes.c_uint32
     kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-    if not handle:
-        # A terminated process whose last handle has closed is already gone;
-        # Windows reports ERROR_INVALID_PARAMETER for its now-invalid PID.
-        assert ctypes.get_last_error() == 87, 'could not inspect descendant process'
-    else:
-        try:
-            assert kernel32.WaitForSingleObject(handle, 5000) == 0, (
-                'descendant remained alive after direct command exit'
-            )
-        finally:
-            kernel32.CloseHandle(handle)
+    assert handle, 'could not open live descendant before releasing direct command'
+    try:
+        release_file.write_text('release')
+        assert entry['done'].wait(15)
+        assert kernel32.WaitForSingleObject(handle, 5000) == 0, (
+            'descendant remained alive after direct command exit'
+        )
+    finally:
+        kernel32.CloseHandle(handle)
     with store.store.locked():
         records = [record for record in store.load()['operations'].values()
                    if record.get('kind') == 'detached_command']
     assert records[-1]['state'] == 'needs_review'
-
-
-def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
-    import os
-    import time
-    from jan_mcp_commander.control import ControlCommander
-
-    os.environ['JAN_MCP_STATE_DIR'] = state_dir
-    commander = ControlCommander(Path(workspace),
-                                 enabled={'files', 'commands', 'browser', 'desktop'})
-    grandchild = (
-        "import time; "
-        "open(" + repr(pid_file) + ", 'w').write(str(__import__('os').getpid())); "
-        "time.sleep(30)"
-    )
-    command = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
-        "start_new_session=True, close_fds=True, "
-        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-        "time.sleep(30)"
-    )
-    result = commander.start_program(sys.executable, ['-c', command], timeout_seconds=60)
-    connection.send({'child_pid': result['pid']})
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not Path(pid_file).exists():
-        time.sleep(0.02)
-    if not Path(pid_file).exists():
-        connection.send({'error': 'grandchild did not start'})
-        os._exit(2)
-    connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
-    # Simulate abrupt PCRC parent death: skip all Python cleanup.
-    os._exit(0)
 
 
 def _cross_process_recovery_worker(state_dir, workspace, start, connection):
