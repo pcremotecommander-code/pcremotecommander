@@ -804,7 +804,7 @@ def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
 
         queued = pc.process_input('live-command', 'continue')
         assert queued == {'queued': True, 'delivery_verified': False}
-        assert input_queue.get_nowait() == b'continue\\n'
+        assert input_queue.get_nowait() == b'continue\n'
 
         done.set()
         with store.guard(['file:after-command.txt']):
