@@ -145,17 +145,17 @@ def supervise(config):
 
         options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else {"start_new_session": True})
-        pass_fds = ()
+        inherited_lock = {}
         if os.name == "posix":
             # The child inherits the same open-file-description lock. If this
             # supervisor is SIGKILLed, recovery still sees the lock until the
             # command process exits (and until inherited descriptors close).
             os.set_inheritable(lock_fd, True)
-            pass_fds = (lock_fd,)
+            inherited_lock["pass_fds"] = (lock_fd,)
         child = subprocess.Popen(
             config["argv"], cwd=config["workspace"], env=os.environ.copy(),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, shell=False, pass_fds=pass_fds, **options,
+            stderr=subprocess.STDOUT, shell=False, **inherited_lock, **options,
         )
         _CHILD_PGID = child.pid if os.name == "posix" else None
         sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
