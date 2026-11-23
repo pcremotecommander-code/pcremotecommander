@@ -610,6 +610,86 @@ def test_task_reconciliation_cannot_release_live_operation_lock(pc):
 
 
 
+def test_operation_reconciliation_cannot_release_needs_review_while_lock_is_live(pc):
+    store = coordinator(pc)
+    entered = __import__('threading').Event()
+    release = __import__('threading').Event()
+    resource_id = 'file:reviewed-but-live.txt'
+
+    def hold_resource():
+        with store.store.resource_locked(resource_id):
+            entered.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(hold_resource)
+        assert entered.wait(5)
+        with store.store.locked():
+            data = store.load()
+            data['operations']['reviewed-live'] = {
+                'id': 'reviewed-live',
+                'state': 'needs_review',
+                'resources': [resource_id],
+                'owner': {'pid': 999999, 'thread': 4},
+                'started_at': 1000,
+            }
+            store.save(data)
+        try:
+            with pytest.raises(CoordinationError, match='still holds a resource lock'):
+                store.task('reconcile_operation', operation_id='reviewed-live', reviewed=True)
+            with store.store.locked():
+                assert store.load()['operations']['reviewed-live']['state'] == 'needs_review'
+        finally:
+            release.set()
+            future.result(timeout=5)
+
+    result = store.task('reconcile_operation', operation_id='reviewed-live', reviewed=True)
+    assert result['state'] == 'abandoned_after_review'
+
+
+def test_task_reconciliation_cannot_release_needs_review_operation_with_live_lock(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'reviewed but still unwinding', ['file:reviewed-task-live.txt'])
+    entered = __import__('threading').Event()
+    release = __import__('threading').Event()
+    resource_id = 'file:reviewed-task-live.txt'
+
+    def hold_resource():
+        with store.store.resource_locked(resource_id):
+            entered.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(hold_resource)
+        assert entered.wait(5)
+        with store.store.locked():
+            data = store.load()
+            data['operations']['reviewed-task-live'] = {
+                'id': 'reviewed-task-live',
+                'state': 'needs_review',
+                'resources': [resource_id],
+                'owner': {'pid': 999999, 'thread': 5},
+                'task_id': lease['id'],
+                'started_at': 1000,
+            }
+            store.save(data)
+        try:
+            with pytest.raises(CoordinationError, match='still holds a resource lock'):
+                store.task('reconcile', task_id=lease['id'], reviewed=True)
+            with store.store.locked():
+                assert store.load()['operations']['reviewed-task-live']['state'] == 'needs_review'
+            assert store.task('renew', task_id=lease['id'],
+                              lease_token=lease['lease_token'])['status'] == 'active'
+        finally:
+            release.set()
+            future.result(timeout=5)
+
+    result = store.task('reconcile', task_id=lease['id'], reviewed=True)
+    assert result['status'] == 'queued'
+    with store.store.locked():
+        assert store.load()['operations']['reviewed-task-live']['state'] == 'abandoned_after_review'
+
+
 def test_reconciliation_cannot_reopen_a_finished_task_for_late_operation_record(pc):
     store = coordinator(pc)
     lease = claim(store, 'finished task', ['file:finished.txt'])
