@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import json
 import os
 import signal
@@ -266,12 +267,12 @@ def _enable_linux_subreaper():
 
 
 def _linux_process_table():
-    """Snapshot PID parentage and start times from procfs."""
+    """Snapshot PID parentage and start times from procfs, or fail closed."""
     processes = {}
     try:
         entries = os.scandir("/proc")
     except OSError:
-        return processes
+        return None
     with entries:
         for entry in entries:
             if not entry.name.isdigit():
@@ -280,14 +281,19 @@ def _linux_process_table():
                 raw = Path(entry.path, "stat").read_text()
                 fields = raw[raw.rfind(")") + 1:].split()
                 processes[int(entry.name)] = (int(fields[1]), int(fields[19]))
-            except (OSError, ValueError, IndexError):
+            except FileNotFoundError:
+                # The process exited while procfs was being scanned.
                 continue
+            except (OSError, ValueError, IndexError):
+                return None
     return processes
 
 
 def _linux_descendants(root_pid):
     """Return (pid, start_time) identities below a process in the procfs tree."""
     processes = _linux_process_table()
+    if processes is None:
+        return None
     descendants = {}
     frontier = {root_pid}
     while frontier:
@@ -308,13 +314,20 @@ def _linux_kill_process_identity(pid, expected_start_time):
     pidfd = None
     try:
         if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
-            pidfd = os.pidfd_open(pid, 0)
-            current = _linux_process_table().get(pid)
-            if current is None or current[1] != expected_start_time:
-                return False
-            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
-            return True
-        current = _linux_process_table().get(pid)
+            try:
+                pidfd = os.pidfd_open(pid, 0)
+            except OSError as exc:
+                if exc.errno not in (errno.ENOSYS, errno.EINVAL, errno.EPERM):
+                    raise
+            if pidfd is not None:
+                current_table = _linux_process_table()
+                current = None if current_table is None else current_table.get(pid)
+                if current is None or current[1] != expected_start_time:
+                    return False
+                signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+                return True
+        current_table = _linux_process_table()
+        current = None if current_table is None else current_table.get(pid)
         if current is None or current[1] != expected_start_time:
             return False
         os.kill(pid, signal.SIGKILL)
@@ -347,9 +360,14 @@ def _terminate_linux_descendants():
     terminated = False
     while True:
         descendants = _linux_descendants(os.getpid())
+        if descendants is None:
+            # Procfs is required to prove that no descendants remain.
+            time.sleep(0.05)
+            continue
         if not descendants:
             _reap_linux_children()
-            if not _linux_descendants(os.getpid()):
+            remaining = _linux_descendants(os.getpid())
+            if remaining == []:
                 return terminated
         for pid, start_time in descendants:
             if _linux_kill_process_identity(pid, start_time):
