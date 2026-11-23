@@ -562,6 +562,21 @@ class Coordination:
         targets = sorted(set(resource(item) for item in resources))
         outer_resources = self.depth.get()
         if outer_resources is not None:
+            # Revalidate the task lease and its own resource scope even for
+            # nested calls. The outer reservation is an additional boundary,
+            # not a substitute for the assigned task's narrower permissions.
+            current = assignment.get()
+            if current:
+                with self.store.locked():
+                    data = self.load()
+                    self.expire(data)
+                    own = data['tasks'].get(current[0])
+                    if own is None:
+                        raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
+                    self.validate(own, current[1])
+                    if any(not any(covers(allowed, target) for allowed in own['resources'])
+                           for target in targets):
+                        raise CoordinationError('TASK_SCOPE_DENIED', 'This operation exceeds the assignment. Finish and claim an appropriate reservation before continuing.')
             if any(not any(covers(allowed, target) for allowed in outer_resources)
                    for target in targets):
                 raise CoordinationError('TASK_SCOPE_DENIED', 'A nested operation cannot widen its outer resource reservation.')
@@ -692,6 +707,7 @@ def coordinated(kind, *paths):
         @wraps(method)
         def guarded(self, *args, **kwargs):
             bound = signature.bind(self, *args, **kwargs)
+            bound.apply_defaults()
             targets = [resource('file:' + bound.arguments[p]) for p in paths] if paths else [kind]
             with coordinator(self).guard(targets, allow_active_sessions=method.__name__ == 'process_input'):
                 result = method(self, *args, **kwargs)
