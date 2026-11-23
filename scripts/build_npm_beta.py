@@ -14,7 +14,7 @@ from build_source_preview import ROOT
 
 
 NAME = "pcremotecommander"
-VERSION = "0.7.0-beta.45"
+VERSION = json.loads((ROOT / "deploy/npm/launcher/package.json").read_text(encoding="utf-8"))["version"]
 PDFIUM_WHEEL = ROOT/'work/dependency-wheels/pypdfium2-5.14.0-py3-none-win_amd64.whl'
 PDFIUM_SHA256 = '149fd5c6397b8df8bf7911a93506eff0be874f877afe7ac936cf5d37d21a6a06'
 PDF_WHEEL = ROOT/'work/dependency-wheels/pypdf-6.21.4-py3-none-any.whl'
@@ -47,7 +47,9 @@ def install_pillow(destination,manifest):
             target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(wheel.read(item));manifest[relative]=digest(target)
 
 
-def build(base: Path, destination: Path) -> dict:
+def build(base: Path, destination: Path, version: str = VERSION) -> dict:
+    if not isinstance(version, str) or not __import__("re").fullmatch(r"0\\.7\\.0-beta\\.[1-9][0-9]*", version):
+        raise ValueError("Release version must be a valid 0.7.0-beta.N version")
     subprocess.run(['node',str(ROOT/'scripts/generate_privacy_guard.cjs')],check=True)
     base = base.resolve()
     destination = destination.resolve()
@@ -101,7 +103,7 @@ def build(base: Path, destination: Path) -> dict:
     privacy_relative='src/jan_mcp_commander/privacy-rules.json'
     shutil.copy2(ROOT/privacy_relative,destination/'project'/privacy_relative)
     manifest[privacy_relative]=digest(ROOT/privacy_relative)
-    version_file.write_text('__version__ = '+json.dumps(VERSION)+'\n', encoding='utf-8')
+    version_file.write_text('__version__ = '+json.dumps(version)+'\n', encoding='utf-8')
     manifest['src/jan_mcp_commander/__init__.py'] = digest(version_file)
     for source in sorted((ROOT / 'src/jan_mcp_commander/skill_data').rglob('*')):
         if source.is_file() and source.suffix in {'.md', '.yaml'}:
@@ -119,7 +121,7 @@ def build(base: Path, destination: Path) -> dict:
         manifest["deploy/npm/jan-commander/bin/" + filename] = digest(source)
     agent_metadata = destination / "project/deploy/npm/jan-commander/package.json"
     agent_package = json.loads((ROOT / "deploy/npm/jan-commander/package.json").read_text(encoding="utf-8"))
-    agent_package["version"] = VERSION
+    agent_package["version"] = version
     agent_metadata.write_text(json.dumps(agent_package, indent=2) + "\n", encoding="utf-8")
     manifest["deploy/npm/jan-commander/package.json"] = digest(agent_metadata)
     task_source = ROOT / "deploy/mcp-task-server"
@@ -138,7 +140,7 @@ def build(base: Path, destination: Path) -> dict:
     manifest["deploy/mcp-task-server/package.json"] = digest(task_target / "package.json")
     package = {
         "name": NAME,
-        "version": VERSION,
+        "version": version,
         "description": "PC Remote Commander Windows beta with bundled Python runtime",
         "license": "SEE LICENSE IN LICENSE.txt",
         "bin": {NAME: "bin/npx-onboard.cjs"},
@@ -165,12 +167,13 @@ def build(base: Path, destination: Path) -> dict:
         encoding="utf-8",
     )
     (destination / "SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return {"destination": str(destination), "name": NAME, "version": VERSION, "verified_files": len(manifest)}
+    return {"destination": str(destination), "name": NAME, "version": version, "verified_files": len(manifest)}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base", type=Path)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--version", default=VERSION, help="Validated beta version to package (defaults to launcher package metadata)")
     args = parser.parse_args()
-    print(json.dumps(build(args.base, args.destination), indent=2))
+    print(json.dumps(build(args.base, args.destination, args.version), indent=2))
