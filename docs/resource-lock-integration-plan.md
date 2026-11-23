@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The fail-fast Windows/Ubuntu workflow passed on commit `c45e70b`: Ubuntu resource-lock 6 passed, coordination 42 passed, development 32 passed; Windows resource-lock 5 passed, coordination 44 passed, development 31 passed. The Linux parent-death test and Windows Job Object direct-descendant and parent-death tests passed on their respective platforms. A subsequent test-only adjustment removes a timing dependency from the interactive-session test and is awaiting its own CI run. Production remains untouched.
+Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The fail-fast Windows/Ubuntu workflow passed on commit `b080cd6`: Ubuntu resource-lock 6 passed, coordination 42 passed, development 32 passed; Windows resource-lock 5 passed, coordination 44 passed, development 31 passed. The Linux parent-death test and Windows Job Object direct-descendant and parent-death tests passed on their respective platforms. Production remains untouched.
 
 ## Current behavior
 
