@@ -252,10 +252,16 @@ class ControlCommander(PortableCommander):
             raise PermissionDenied('Control capability disabled or expired; enable it locally')
 
     def _check(self, capability):
-        self._require_capability(capability)
-        self._rate()
-        # Never log command text, website content, form values or screenshots.
-        self._audit('control_intent', True, capability)
+        # Capability, rate-limit and audit checks are preflight gates. If one
+        # rejects an operation, the coordination ledger must record a clean
+        # precondition failure, not an uncertain side effect requiring review.
+        try:
+            self._require_capability(capability)
+            self._rate()
+            # Never log command text, website content, form values or screenshots.
+            self._audit('control_intent', True, capability)
+        except PermissionDenied as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     def skill_feedback(self, category, selected_skill, routing_method, outcome, correction=''):
         self._check('files')
