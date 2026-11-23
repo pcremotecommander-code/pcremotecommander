@@ -410,7 +410,15 @@ class Development:
         thread=threading.Thread(target=execute,name='pcrc-development',daemon=True)
         self.active[identifier]=thread;self.deadlines[identifier]=time.monotonic()+600
         try:thread.start()
-        except Exception:self.active.pop(identifier,None);self.unlock(fd);raise
+        except Exception:
+            self.active.pop(identifier,None);self.deadlines.pop(identifier,None);self.unlock(fd)
+            # A failed thread start has performed no worker actions. Restore
+            # the reviewed plan only when the thread is definitely not alive.
+            if not thread.is_alive():
+                self.update(identifier,status='previewed',automatic_retry=False)
+            else:
+                self.update(identifier,status='unknown',error='Worker start outcome is uncertain; inspect before retrying',automatic_retry=False)
+            raise
 
     def command(self,identifier,argv):
         self.commander._require_capability('commands');self.commander._require_capability('files')
@@ -498,11 +506,11 @@ class Development:
         with self.store.locked():
             plans=self.load();plan=plans.get(identifier)
             if plan is None:raise ValueError('Development plan not found')
-            if plan['status'] in {'preparing','applying'} and identifier not in self.active:
+            if plan['status'] in {'queued_for_apply','preparing','applying'} and identifier not in self.active:
                 fd=self.worker_lock(identifier)
                 if fd is not None:
                     self.unlock(fd)
-                    plan.update(status='unknown',error='Agent restarted during work; inspect actual environment and logs; no replay',automatic_retry=False);self.save(plans)
+                    plan.update(status='unknown',error='Agent stopped before the worker could be confirmed active; inspect the environment and logs; no replay',automatic_retry=False);self.save(plans)
             return {**plan,'poll_after_seconds':2}
 
     def apply(self,identifier,review_sha256):
@@ -511,7 +519,16 @@ class Development:
             plans=self.load();plan=plans[identifier]
             if plan['status']!='previewed' or plan['expires_at']<=time.time() or plan['review_sha256']!=review_sha256:raise ValueError('Review stale, altered, expired or already used')
             plan['status']='queued_for_apply';self.save(plans)
-        self.launch(identifier,self.execute)
+        try:
+            self.launch(identifier,self.execute)
+        except Exception:
+            # Capacity/lock rejection occurs before execution. If the worker
+            # never advanced the durable state, restore the reviewed plan.
+            with self.store.locked():
+                plans=self.load();current=plans.get(identifier)
+                if current and current.get('status')=='queued_for_apply':
+                    current['status']='previewed';self.save(plans)
+            raise
         return self.get(identifier)
 
     def execute(self,identifier):
