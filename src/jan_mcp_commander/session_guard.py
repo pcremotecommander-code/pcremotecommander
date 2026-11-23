@@ -1,6 +1,7 @@
-"""Detached command supervisor with a durable cross-process resource lock."""
+"""Detached command supervisor with cross-process lifetime fencing."""
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import signal
@@ -9,31 +10,9 @@ import sys
 import threading
 from pathlib import Path
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .security import PrivateStore
 
-
-def _parent_death(death_signal=None):
-    """Return a pre-exec hook that kills this child if its parent disappears."""
-    if death_signal is None:
-        death_signal = getattr(signal, 'SIGKILL', signal.SIGTERM)
-    import ctypes
-    import ctypes.util
-    libc = ctypes.CDLL(ctypes.util.find_library("c") or None, use_errno=True)
-    parent_pid = os.getpid()
-
-    def configure():
-        libc.prctl(1, death_signal, 0, 0, 0)  # Linux PR_SET_PDEATHSIG
-        if os.getppid() != parent_pid:
-            os.kill(os.getpid(), signal.SIGKILL)
-    return configure
-
-
-
-
-
-def parent_death_preexec():
-    return _parent_death(signal.SIGTERM)
+_CHILD_PGID = None
 
 
 def assign_supervisor_job(process):
@@ -43,7 +22,7 @@ def assign_supervisor_job(process):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, wintypes.INT,
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
                                                   ctypes.c_void_p, wintypes.DWORD]
     kernel32.SetInformationJobObject.restype = wintypes.BOOL
     kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
@@ -83,8 +62,7 @@ def assign_supervisor_job(process):
         raise ctypes.WinError(ctypes.get_last_error())
     info = EXTENDED_LIMIT()
     info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
-    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info),
-                                             ctypes.sizeof(info)):
+    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
         error = ctypes.get_last_error()
         kernel32.CloseHandle(job)
         raise ctypes.WinError(error)
@@ -105,23 +83,33 @@ def close_supervisor_job(handle):
         kernel32.CloseHandle(wintypes.HANDLE(handle))
 
 
-def _mark_completed(store, operation_id):
-    with store.locked():
+def _parent_terminated(signum, frame):
+    # Child commands have their own process group. A parent death or an
+    # orderly stop terminates that complete group before releasing the lock.
+    if _CHILD_PGID is not None:
         try:
-            blob = store.tree.read("tasks.enc", 2 * 1024 * 1024)
-        except FileNotFoundError:
-            return
-        data = json.loads(AESGCM(store.key).decrypt(
-            blob[:12], blob[12:], store.context))
-        record = data.get("operations", {}).get(operation_id)
-        if not isinstance(record, dict) or record.get("state") != "active":
-            return
-        record.update(state="completed", finished_at=__import__("time").time(),
-                      note="Detached command process exited under its supervisor.")
-        raw = json.dumps(data, ensure_ascii=True).encode()
-        nonce = os.urandom(12)
-        store.tree.write("tasks.enc", nonce + AESGCM(store.key).encrypt(
-            nonce, raw, store.context), overwrite=True)
+            os.killpg(_CHILD_PGID, signal.SIGKILL)
+        except OSError:
+            pass
+    os._exit(125)
+
+
+def _install_parent_death_guard():
+    if os.name != "posix":
+        return
+    expected = os.environ.pop("PCRC_SUPERVISOR_PARENT_PID", "")
+    if not expected.isdigit():
+        raise RuntimeError("missing supervisor parent identity")
+    expected_pid = int(expected)
+    if os.getppid() != expected_pid:
+        os.kill(os.getpid(), signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _parent_terminated)
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    if os.getppid() != expected_pid:
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 def _forward_input(source, destination):
@@ -142,10 +130,10 @@ def _forward_input(source, destination):
 
 
 def supervise(config):
+    global _CHILD_PGID
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
-    with store.resource_locked(config["lock_resource"]):
-        # Parent has not authorized the command to start yet. EOF means the
-        # caller died or abandoned startup, so no user process is launched.
+    lock_resource = config["lock_resource"]
+    with store.resource_locked(lock_resource) as lock_fd:
         sys.stdout.write(json.dumps({"locked": True}) + "\n")
         sys.stdout.flush()
         launch = sys.stdin.buffer.readline(4096)
@@ -154,31 +142,22 @@ def supervise(config):
         launch_data = json.loads(launch.decode())
         if launch_data.get("launch") is not True or not isinstance(launch_data.get("operation_id"), str):
             return 125
-        operation_id = launch_data["operation_id"]
 
         options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-                   if os.name == "nt" else
-                   {"preexec_fn": _parent_death()})
-        try:
-            child = subprocess.Popen(
-                config["argv"], cwd=config["workspace"], env=os.environ.copy(),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, shell=False, **options,
-            )
-        except BaseException:
-            with store.locked():
-                blob = store.tree.read("tasks.enc", 2 * 1024 * 1024)
-                data = json.loads(AESGCM(store.key).decrypt(blob[:12], blob[12:], store.context))
-                record = data.get("operations", {}).get(operation_id)
-                if isinstance(record, dict) and record.get("state") == "active":
-                    record.update(state="failed", finished_at=__import__("time").time(),
-                                  note="Supervisor could not create the child process; no command process started.")
-                    raw = json.dumps(data, ensure_ascii=True).encode()
-                    nonce = os.urandom(12)
-                    store.tree.write("tasks.enc", nonce + AESGCM(store.key).encrypt(
-                        nonce, raw, store.context), overwrite=True)
-            raise
-        config["operation_id"] = operation_id
+                   if os.name == "nt" else {"start_new_session": True})
+        pass_fds = ()
+        if os.name == "posix":
+            # The child inherits the same open-file-description lock. If this
+            # supervisor is SIGKILLed, recovery still sees the lock until the
+            # command process exits (and until inherited descriptors close).
+            os.set_inheritable(lock_fd, True)
+            pass_fds = (lock_fd,)
+        child = subprocess.Popen(
+            config["argv"], cwd=config["workspace"], env=os.environ.copy(),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, shell=False, pass_fds=pass_fds, **options,
+        )
+        _CHILD_PGID = child.pid if os.name == "posix" else None
         sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
         sys.stdout.flush()
         input_thread = threading.Thread(
@@ -192,9 +171,7 @@ def supervise(config):
                     break
                 sys.stdout.buffer.write(packet)
                 sys.stdout.buffer.flush()
-            exit_code = child.wait()
-            _mark_completed(store, config["operation_id"])
-            return exit_code
+            return child.wait()
         finally:
             if child.poll() is None:
                 try:
@@ -215,19 +192,9 @@ def supervise(config):
                     pass
 
 
-def _parent_terminated(signum, frame):
-    # The supervisor and its child process tree share one POSIX process group.
-    # Killing the group prevents grandchildren from outliving the reservation.
-    try:
-        os.killpg(os.getpgrp(), signal.SIGKILL)
-    except OSError:
-        os._exit(125)
-
-
 def main():
-    if os.name == "posix":
-        signal.signal(signal.SIGTERM, _parent_terminated)
     try:
+        _install_parent_death_guard()
         config_line = sys.stdin.buffer.readline(1024 * 1024)
         if not config_line:
             return 125
