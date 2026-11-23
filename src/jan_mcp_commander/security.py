@@ -136,7 +136,7 @@ class PrivateStore:
                                 raise
                             time.sleep(0.05)
                 try:
-                    yield
+                    yield fd
                 finally:
                     if os.name == 'posix':
                         fcntl.flock(fd, fcntl.LOCK_UN)
