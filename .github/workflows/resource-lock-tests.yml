@@ -68,3 +68,5 @@ jobs:
 # Include task-owned session-list isolation in the Windows and Ubuntu regression run.
 
 # Re-run recovery tests after correcting the preview setup in the queued-apply test.
+
+# Re-run Windows and Ubuntu regression coverage after fixing the session-test import.
