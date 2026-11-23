@@ -15,6 +15,7 @@ from .security import PrivateStore
 
 assignment = ContextVar('pcrc_assignment', default=None)
 MAX_ACTIVE_ASSIGNMENTS = 8
+LEASE_SECONDS = 600
 
 
 class CoordinationError(PermissionDenied):
@@ -92,7 +93,7 @@ class Coordination:
             if len(held)>=MAX_ACTIVE_ASSIGNMENTS or any(overlaps(a,b) for other in held+blocked for a in other['resources'] for b in task['resources']):
                 blocked.append(task)
                 continue
-            task.update(status='active',expires_at=self.clock()+120)
+            task.update(status='active',expires_at=self.clock()+LEASE_SECONDS)
             held.append(task)
             changed=True
         return changed
@@ -139,7 +140,7 @@ class Coordination:
                     raise ValueError('Agent label and 1..20 resources required')
                 resources = sorted(set(resource(r) for r in resources))
                 order=max((t.get('queue_order',0) for t in tasks.values()),default=0)+1
-                task.update(agent=agent, resources=resources, status='waiting', expires_at=self.clock() + 120,queue_order=order,
+                task.update(agent=agent, resources=resources, status='waiting', expires_at=self.clock() + LEASE_SECONDS,queue_order=order,
                             lease_token=secrets.token_urlsafe(32), revision=task['revision'] + 1)
                 self.promote(data)
                 if not wait and task['status'] == 'waiting':
@@ -149,7 +150,7 @@ class Coordination:
                     )
                 self.save(data)
                 instructions = (
-                    'Waiting grants no execution access. Poll renew_task within 120 seconds until active. '
+                    'Waiting grants no execution access. Poll renew_task within 600 seconds until active. '
                     if task['status'] == 'waiting' else
                     'Assignment is active. Use only the approved operations within its resources. '
                 )
@@ -158,7 +159,7 @@ class Coordination:
             if action in {'renew', 'finish'}:
                 self.validate(task, args.get('lease_token'),waiting=True)
                 if action == 'renew':
-                    task['expires_at'] = self.clock() + 120
+                    task['expires_at'] = self.clock() + LEASE_SECONDS
                 else:
                     if task['status']=='waiting' and args.get('status') not in {'queued','failed'}:
                         raise CoordinationError('TASK_LEASE_REQUIRED','A waiting assignment has not executed work. Cancel it with failed or queued; do not mark it completed.')
@@ -225,10 +226,19 @@ class Coordination:
                     continue
                 if any(overlaps(a, b) for a in task['resources'] for b in resources):
                     raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
+            # Renew before and after each guarded operation. The reservation
+            # lock remains held for the operation, so no competing task can
+            # acquire these resources while a long call is in flight.
+            if own is not None:
+                own['expires_at'] = self.clock() + LEASE_SECONDS
+                self.save(data)
             marker = self.depth.set(True)
             try:
                 yield
             finally:
+                if own is not None:
+                    own['expires_at'] = self.clock() + LEASE_SECONDS
+                    self.save(data)
                 self.depth.reset(marker)
 
 
