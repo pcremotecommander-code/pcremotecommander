@@ -7,6 +7,7 @@ import pytest
 from starlette.testclient import TestClient
 from jan_mcp_commander.http_server import create_app
 from jan_mcp_commander.control import ControlCommander
+from jan_mcp_commander.core import PermissionDenied
 from jan_mcp_commander.coordination import Coordination, CoordinationError, assignment, coordinator
 
 
@@ -894,6 +895,45 @@ def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
             pass
     finally:
         pc._sessions.pop('live-command', None)
+
+
+def test_task_assignment_cannot_control_another_task_command_session(pc):
+    import queue
+    from threading import Event
+    from types import SimpleNamespace
+
+    store = coordinator(pc)
+    lease = claim(store, 'task with no session ownership', ['workspace'])
+    pc._sessions['foreign-session'] = {
+        'profile': 'operator_command',
+        'done': Event(),
+        'input_closed': False,
+        'input_queue': queue.Queue(maxsize=4),
+        'output': bytearray(b'private output'),
+        'truncated': False,
+        'timed_out': False,
+        'process': SimpleNamespace(poll=lambda: None),
+        'task_id': 'different-task-id',
+    }
+
+    calls = [
+        lambda: pc.process_input('foreign-session', 'do something'),
+        lambda: pc.process_output('foreign-session'),
+        lambda: pc.session_output('foreign-session'),
+        lambda: pc.stop_session('foreign-session'),
+    ]
+    for call in calls:
+        with pytest.raises(PermissionDenied, match='belongs to another task'):
+            assigned(lease, call)
+
+
+def test_fixed_profile_session_records_task_owner_and_requires_commands_capability(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'profile session owner', ['workspace'])
+    result = assigned(lease, lambda: pc.start_session('disk_usage'))
+    entry = pc._sessions[result['session_id']]
+    assert entry.get('task_id') == lease['id']
+    assert assigned(lease, lambda: pc.stop_session(result['session_id']))['stopped'] == result['session_id']
 
 
 def test_detached_command_reservation_survives_request_process_scope(pc):
