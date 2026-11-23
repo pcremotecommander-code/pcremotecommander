@@ -533,26 +533,64 @@ def supervise(config):
             args=(sys.stdin.buffer, child.stdin, child_done), daemon=False)
         input_thread.start()
         try:
+            # Do not wait for pipe EOF before observing the direct command's
+            # exit: a background descendant may have inherited stdout/stderr.
+            pipe_closed = False
+            while child.poll() is None:
+                if pipe_closed:
+                    time.sleep(0.02)
+                    continue
+                if os.name == "posix":
+                    import select
+                    readable, _, _ = select.select([child.stdout], [], [], 0.05)
+                    if not readable:
+                        continue
+                else:
+                    import msvcrt
+                    from ctypes import wintypes
+                    kernel32 = _kernel32()
+                    kernel32.PeekNamedPipe.argtypes = [
+                        wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                        ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+                    kernel32.PeekNamedPipe.restype = wintypes.BOOL
+                    available = wintypes.DWORD()
+                    pipe_handle = msvcrt.get_osfhandle(child.stdout.fileno())
+                    if not kernel32.PeekNamedPipe(
+                            wintypes.HANDLE(pipe_handle), None, 0, None,
+                            ctypes.byref(available), None):
+                        pipe_closed = True
+                        continue
+                    if not available.value:
+                        time.sleep(0.02)
+                        continue
+                packet = child.stdout.read1(4096)
+                if packet:
+                    sys.stdout.buffer.write(packet)
+                    sys.stdout.buffer.flush()
+                else:
+                    pipe_closed = True
+
+            exit_code = child.wait()
+            descendants_terminated = False
+            if os.name == "posix":
+                descendants_terminated = _terminate_linux_descendants()
+            else:
+                try:
+                    if windows_job_active_processes(_JOB_HANDLE):
+                        descendants_terminated = terminate_windows_job(_JOB_HANDLE)
+                except OSError:
+                    descendants_terminated = terminate_windows_job(_JOB_HANDLE)
+            # Once descendants are gone, the output pipe must reach EOF. Drain
+            # buffered output without allowing a detached writer to hold the
+            # workspace reservation open.
             while True:
                 packet = child.stdout.read1(4096)
                 if not packet:
                     break
                 sys.stdout.buffer.write(packet)
                 sys.stdout.buffer.flush()
-            exit_code = child.wait()
-            if os.name == "posix" and _terminate_linux_descendants():
-                # The requested command left background descendants behind.
-                # They were terminated, so require review rather than treating
-                # the operation as a clean completion.
+            if descendants_terminated:
                 return 125
-            if os.name == "nt":
-                try:
-                    if windows_job_active_processes(_JOB_HANDLE):
-                        terminate_windows_job(_JOB_HANDLE)
-                        return 125
-                except OSError:
-                    terminate_windows_job(_JOB_HANDLE)
-                    return 125
             return exit_code
         finally:
             child_done.set()
