@@ -486,7 +486,7 @@ class ControlCommander(PortableCommander):
         def launch():
             from .session_guard import (
                 create_windows_job_handle, close_windows_job_handle,
-                terminate_windows_job, terminate_windows_job_and_wait,
+                terminate_windows_job_and_wait,
             )
             store = coordinator(self).store
             lock_resource = 'session:' + uuid.uuid4().hex
