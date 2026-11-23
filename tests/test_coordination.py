@@ -886,7 +886,8 @@ def test_detached_grandchild_is_terminated_before_workspace_reservation_releases
     pid_file = tmp_path / 'escaped-grandchild.pid'
     grandchild = (
         "import time; "
-        "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
+        "f=open(" + repr(str(pid_file)) + ", 'w'); "
+        "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
         "time.sleep(30)"
     )
     parent = (
@@ -1045,8 +1046,9 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
         "time.sleep(30)"
     )
     wait_for_grandchild = (
-        "while not os.path.exists(" + repr(str(pid_file)) +
-        ") and time.monotonic()<deadline: time.sleep(0.01)"
+        "while (not os.path.exists(" + repr(str(pid_file)) +
+        ") or os.path.getsize(" + repr(str(pid_file)) +
+        ") == 0) and time.monotonic()<deadline: time.sleep(0.01)"
     )
     wait_for_release = (
         "while not os.path.exists(" + repr(str(release_file)) +
@@ -1062,9 +1064,9 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
     result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=30)
     entry = pc._sessions[result['session_id']]
     deadline = time.monotonic() + 10
-    while not pid_file.exists() and time.monotonic() < deadline:
+    while (not pid_file.exists() or pid_file.stat().st_size == 0) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert pid_file.exists(), 'Job Object descendant did not start'
+    assert pid_file.exists() and pid_file.stat().st_size > 0, 'Job Object descendant did not start'
     pid = int(pid_file.read_text())
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
     kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
@@ -1111,9 +1113,10 @@ def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
     result = commander.start_program(sys.executable, ['-c', command], timeout_seconds=60)
     connection.send({'child_pid': result['pid']})
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not Path(pid_file).exists():
+    while (time.monotonic() < deadline and
+           (not Path(pid_file).exists() or Path(pid_file).stat().st_size == 0)):
         time.sleep(0.02)
-    if not Path(pid_file).exists():
+    if not Path(pid_file).exists() or Path(pid_file).stat().st_size == 0:
         connection.send({'error': 'grandchild did not start'})
         os._exit(2)
     connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
