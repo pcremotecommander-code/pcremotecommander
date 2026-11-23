@@ -51,6 +51,29 @@ def test_scope_and_capabilities(pc):
     pc.enabled=frozenset({'files'})
     with pytest.raises(PermissionDenied):pc.inspect_development('runtime.list',{})
 
+def test_interrupted_queued_apply_is_marked_unknown_without_replay(pc,monkeypatch):
+    service=pc._development()
+    monkeypatch.setattr(service,'launch',lambda *a:None)
+    monkeypatch.setattr(service,'full_runtime',lambda p:{'executable':sys.executable,'modules':{'venv':True,'ensurepip':True}})
+    plan=wait(pc,service.preview('environment.create',{'runtime':'synthetic'}))
+    result=service.apply(plan['plan_id'],plan['review_sha256'])
+    assert result['status']=='unknown'
+    assert result['automatic_retry'] is False
+    assert 'no replay' in result['error']
+
+
+def test_worker_capacity_rejection_restores_reviewed_plan(pc,monkeypatch):
+    service=pc._development()
+    monkeypatch.setattr(service,'full_runtime',lambda p:{'executable':sys.executable,'modules':{'venv':True,'ensurepip':True}})
+    plan=wait(pc,service.preview('environment.create',{'runtime':'synthetic'}))
+    def reject(*args):
+        raise ValueError('Development worker capacity reached')
+    monkeypatch.setattr(service,'launch',reject)
+    with pytest.raises(ValueError,match='capacity'):
+        service.apply(plan['plan_id'],plan['review_sha256'])
+    assert service.get(plan['plan_id'])['status']=='previewed'
+
+
 def test_receipt_fences_restart_and_stale_hash(pc,monkeypatch):
     service=pc._development()
     monkeypatch.setattr(service,'launch',lambda *a:None)
