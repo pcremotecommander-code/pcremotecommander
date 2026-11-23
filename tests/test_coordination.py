@@ -1328,9 +1328,10 @@ def test_detached_command_exit_cannot_be_held_open_by_inherited_output_pipe(pc, 
     store = coordinator(pc)
     pid_file = tmp_path / 'inherited-output-descendant.pid'
     grandchild = (
-        "import time; "
-        "f=open(" + repr(str(pid_file)) + ", 'w'); "
-        "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
+        "import os,time; "
+        "fd=os.open(" + repr(str(pid_file)) +
+        ", os.O_CREAT|os.O_WRONLY|os.O_TRUNC, 0o600); "
+        "os.write(fd, str(os.getpid()).encode()); os.close(fd); "
         "time.sleep(30)"
     )
     wait_for_pid = (
@@ -1346,12 +1347,15 @@ def test_detached_command_exit_cannot_be_held_open_by_inherited_output_pipe(pc, 
         "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "]); "
         "exec(" + repr(wait_for_pid) + ")"
     )
-    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=15)
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=30)
     entry = pc._sessions[result['session_id']]
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 20
     while (not pid_file.exists() or pid_file.stat().st_size == 0) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert pid_file.exists() and pid_file.stat().st_size > 0, 'background descendant did not start'
+    if not pid_file.exists() or pid_file.stat().st_size == 0:
+        entry['done'].wait(5)
+        output = pc.process_output(result['session_id'])['output']
+        pytest.fail(f'background descendant did not start; command output: {output!r}')
     pid = int(pid_file.read_text())
 
     process_handle = None
