@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from .core import PermissionDenied
+from .core import OperationNotApplied, PermissionDenied
 from .safe_fs import parts
 from .security import PrivateStore
 
@@ -339,7 +339,7 @@ class Coordination:
                 if len(operations) >= MAX_OPERATION_RECORDS:
                     completed = sorted(
                         ((record.get('finished_at', 0), key) for key, record in operations.items()
-                         if record.get('state') == 'completed'),
+                         if record.get('state') in {'completed', 'failed'}),
                     )
                     while len(operations) >= MAX_OPERATION_RECORDS and completed:
                         _, old_id = completed.pop(0)
@@ -359,6 +359,18 @@ class Coordination:
             marker = self.depth.set(tuple(targets))
             try:
                 yield
+            except OperationNotApplied:
+                with self.store.locked():
+                    data = self.load()
+                    record = data.get('operations', {}).get(operation_id)
+                    if record and record.get('state') == 'active':
+                        record.update(
+                            state='failed',
+                            note='A precondition rejected the operation before mutation. No write was applied.',
+                            finished_at=self.clock(),
+                        )
+                        self.save(data)
+                raise
             except BaseException:
                 with self.store.locked():
                     data = self.load()
