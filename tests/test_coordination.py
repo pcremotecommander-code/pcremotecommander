@@ -831,6 +831,7 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
         assert len(records) == 1
         assert records[0]['resources'] == ['workspace']
         assert records[0]['lock_resources'] == [entry['process'].pcrc_lock_resource]
+        assert pc.process_input(result['session_id'], 'still-running')['queued'] is True
         with pytest.raises(CoordinationError, match='another or uncertain operation'):
             with coordinator(other).guard(['file:while-child-runs.txt']):
                 pytest.fail('another commander entered while detached child was running')
