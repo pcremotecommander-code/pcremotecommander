@@ -1092,6 +1092,81 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
     assert records[-1]['state'] == 'needs_review'
 
 
+def test_detached_command_exit_cannot_be_held_open_by_inherited_output_pipe(pc, tmp_path):
+    import os
+    import time
+
+    store = coordinator(pc)
+    pid_file = tmp_path / 'inherited-output-descendant.pid'
+    grandchild = (
+        "import time; "
+        "f=open(" + repr(str(pid_file)) + ", 'w'); "
+        "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
+        "time.sleep(30)"
+    )
+    parent = (
+        "import subprocess,sys,time,os; "
+        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "]); "
+        "deadline=time.monotonic()+10; "
+        "while not os.path.exists(" + repr(str(pid_file)) +
+        ") or os.path.getsize(" + repr(str(pid_file)) + ") == 0: "
+        "time.sleep(0.01); "
+        "if time.monotonic()>deadline: raise SystemExit(9)"
+    )
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=15)
+    entry = pc._sessions[result['session_id']]
+    deadline = time.monotonic() + 10
+    while (not pid_file.exists() or pid_file.stat().st_size == 0) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert pid_file.exists() and pid_file.stat().st_size > 0, 'background descendant did not start'
+    pid = int(pid_file.read_text())
+
+    process_handle = None
+    pidfd = None
+    if os.name == 'nt':
+        import ctypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        process_handle = kernel32.OpenProcess(0x00100000, False, pid)
+    elif hasattr(os, 'pidfd_open'):
+        try:
+            pidfd = os.pidfd_open(pid, 0)
+        except ProcessLookupError:
+            pass
+
+    assert entry['done'].wait(10), 'inherited output pipe delayed supervisor cleanup'
+    if process_handle:
+        try:
+            assert kernel32.WaitForSingleObject(process_handle, 5000) == 0, (
+                'Windows descendant survived direct-command exit'
+            )
+        finally:
+            kernel32.CloseHandle(process_handle)
+    elif pidfd is not None:
+        import select
+        try:
+            ready, _, _ = select.select([pidfd], [], [], 5)
+            assert ready, 'Linux descendant survived direct-command exit'
+        finally:
+            os.close(pidfd)
+    else:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            pytest.fail('background descendant survived direct-command exit')
+
+    with store.store.locked():
+        records = [record for record in store.load()['operations'].values()
+                   if record.get('kind') == 'detached_command']
+    assert records[-1]['state'] == 'needs_review'
+
+
 def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
     import os
     import time
