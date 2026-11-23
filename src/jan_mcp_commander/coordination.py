@@ -208,6 +208,17 @@ class Coordination:
             self.save(data)
             return identifier
 
+    def set_detached_child_identity(self, operation_id, child_pid):
+        if type(child_pid) is not int or child_pid <= 0:
+            raise ValueError('Invalid detached child process identifier')
+        with self.store.locked():
+            data = self.load()
+            record = data.get('operations', {}).get(operation_id)
+            if not isinstance(record, dict) or record.get('state') != 'active':
+                raise CoordinationError('TASK_REVIEW_REQUIRED', 'Detached operation changed before child identity was recorded.')
+            record.setdefault('owner', {})['child_pid'] = child_pid
+            self.save(data)
+
     def finish_detached_operation(self, operation_id, *, success, exit_code=None, terminated=False):
         """Finalize a detached command only after its lifetime lock is free."""
         with self.store.locked():
