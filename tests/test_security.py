@@ -1,5 +1,7 @@
 """Regressions for reproduced production-backend vulnerabilities."""
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pytest
 from jan_mcp_commander.portable import PortableCommander
@@ -148,3 +150,37 @@ def test_backup_is_bound_to_canonical_workspace(cmd, tmp_path):
     with pytest.raises(PermissionDenied):
         other_cmd.restore_backup(identifier)
     assert not (other / 'a.txt').exists()
+
+
+def test_private_store_resource_locks_allow_independent_resources(cmd):
+    barrier = threading.Barrier(2)
+    def work(resource):
+        with cmd._store.resource_locked(resource):
+            barrier.wait(timeout=3)
+            return resource
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(work, ('file:a.txt', 'file:b.txt')))
+    assert set(results) == {'file:a.txt', 'file:b.txt'}
+
+
+def test_private_store_resource_lock_serializes_same_resource(cmd):
+    entered = threading.Event()
+    release = threading.Event()
+    second_entered = threading.Event()
+    def first():
+        with cmd._store.resource_locked('file:shared.txt'):
+            entered.set()
+            assert release.wait(timeout=3)
+    def second():
+        assert entered.wait(timeout=3)
+        with cmd._store.resource_locked('file:shared.txt'):
+            second_entered.set()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(first)
+        second_future = pool.submit(second)
+        assert entered.wait(timeout=3)
+        assert not second_entered.wait(timeout=0.15)
+        release.set()
+        first_future.result(timeout=3)
+        second_future.result(timeout=3)
+    assert second_entered.is_set()
