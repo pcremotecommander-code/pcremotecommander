@@ -242,7 +242,10 @@ def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
 def test_private_store_try_resource_lock_reports_held_then_available(cmd):
     store = cmd._store
     with store.resource_locked('file:recovery-probe.txt'):
-        with store.try_resource_locked('file:recovery-probe.txt') as acquired:
-            assert acquired is False
+        def probe():
+            with store.try_resource_locked('file:recovery-probe.txt') as acquired:
+                return acquired
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(probe).result(timeout=3) is False
     with store.try_resource_locked('file:recovery-probe.txt') as acquired:
         assert acquired is True
