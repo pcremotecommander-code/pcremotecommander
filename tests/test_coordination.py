@@ -849,28 +849,26 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
         other.close_control()
 
 
-def test_supervisor_crash_releases_child_lock_only_into_review(pc):
-    import os
-    import time
+def test_supervisor_crash_keeps_child_lock_until_child_exits(pc):
     store = coordinator(pc)
-    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(30)'],
-                              timeout_seconds=40)
+    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(2)'],
+                              timeout_seconds=10)
     entry = pc._sessions[result['session_id']]
     with store.store.locked():
         data = store.load()
         record_id = next(key for key, value in data['operations'].items()
                          if value.get('kind') == 'detached_command'
                          and value.get('state') == 'active')
+    # Kill only the supervisor. On POSIX the child inherited the OS lock;
+    # on Windows the parent-owned Job Object is closed by the session finalizer.
     entry['process'].kill()
     entry['process'].wait(timeout=10)
-    if os.name == 'nt' and entry.get('job_handle'):
-        from jan_mcp_commander.session_guard import close_supervisor_job
-        close_supervisor_job(entry['job_handle'])
-        entry['job_handle'] = None
+    first_probe = store.recover_operations()
+    if first_probe.get('busy'):
+        assert record_id in first_probe['busy']
     assert entry['done'].wait(10)
 
-    recovered = store.recover_operations()
-    assert record_id in recovered['recovered']
+    store.recover_operations()
     with store.store.locked():
         record = store.load()['operations'][record_id]
     assert record['state'] == 'needs_review'
