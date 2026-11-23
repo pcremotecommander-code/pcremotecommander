@@ -53,9 +53,9 @@ def test_scope_and_capabilities(pc):
 
 def test_interrupted_queued_apply_is_marked_unknown_without_replay(pc,monkeypatch):
     service=pc._development()
-    monkeypatch.setattr(service,'launch',lambda *a:None)
     monkeypatch.setattr(service,'full_runtime',lambda p:{'executable':sys.executable,'modules':{'venv':True,'ensurepip':True}})
     plan=wait(pc,service.preview('environment.create',{'runtime':'synthetic'}))
+    monkeypatch.setattr(service,'launch',lambda *a:None)
     result=service.apply(plan['plan_id'],plan['review_sha256'])
     assert result['status']=='unknown'
     assert result['automatic_retry'] is False
