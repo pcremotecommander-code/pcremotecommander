@@ -478,19 +478,97 @@ class ControlCommander(PortableCommander):
         return self._start_controlled_argv([str(path), *arguments], timeout_seconds)
 
     def _start_controlled_argv(self, argv, timeout_seconds, environment=None):
-        def launch():
-            self._check('commands')
-            options = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
-            return subprocess.Popen(argv, cwd=self.workspace, env=self._environment() if environment is None else environment, stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, **options)
+        self._check('commands')
+        child_environment = self._environment() if environment is None else environment
         lifetime = max(1, min(timeout_seconds, int(self.expires-time.monotonic())))
-        result = self._start_owned_session('operator_command', launch, lifetime=lifetime, output_limit=1048576)
-        # Lease expiry also terminates this process, independently of polling.
+
+        def launch():
+            from .session_guard import parent_death_preexec, assign_supervisor_job, close_supervisor_job
+            lock_resource = 'session:' + uuid.uuid4().hex
+            options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+                       if os.name == 'nt' else
+                       {'start_new_session': True, 'preexec_fn': parent_death_preexec()})
+            supervisor = subprocess.Popen(
+                [sys.executable, '-m', 'jan_mcp_commander.session_guard'],
+                cwd=self.workspace, env=child_environment, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False, **options)
+            job_handle = None
+            try:
+                if os.name == 'nt':
+                    # Assign before sending launch authorization. The child
+                    # inherits this kill-on-close job from its supervisor.
+                    job_handle = assign_supervisor_job(supervisor)
+                config = {
+                    'workspace': str(self.workspace),
+                    'state_dir': str(coordinator(self).store.path),
+                    'lock_resource': lock_resource,
+                    'argv': argv,
+                }
+                supervisor.stdin.write((json.dumps(config) + '\\n').encode('utf-8'))
+                supervisor.stdin.flush()
+
+                def read_protocol_line():
+                    ready = threading.Event()
+                    result_box = []
+                    def read():
+                        result_box.append(supervisor.stdout.readline())
+                        ready.set()
+                    threading.Thread(target=read, daemon=True).start()
+                    if not ready.wait(15):
+                        raise PermissionDenied('Detached command supervisor did not acquire its reservation in time')
+                    if not result_box[0]:
+                        raise PermissionDenied('Detached command supervisor exited before acquiring its reservation')
+                    try:
+                        return json.loads(result_box[0].decode('utf-8'))
+                    except (UnicodeError, ValueError) as exc:
+                        raise PermissionDenied('Detached command supervisor returned an invalid handshake') from exc
+
+                locked = read_protocol_line()
+                if locked != {'locked': True}:
+                    raise PermissionDenied('Detached command supervisor failed to acquire its reservation')
+                operation_id = coordinator(self).register_detached_operation(
+                    lock_resource, supervisor_pid=supervisor.pid)
+                supervisor.stdin.write((json.dumps({
+                    'launch': True, 'operation_id': operation_id,
+                }) + '\\n').encode('utf-8'))
+                supervisor.stdin.flush()
+                ready = read_protocol_line()
+                if ready.get('ready') is not True or type(ready.get('pid')) is not int:
+                    raise PermissionDenied('Detached command process failed to start')
+                supervisor.pcrc_child_pid = ready['pid']
+                supervisor.pcrc_job_handle = job_handle
+                supervisor.pcrc_lock_resource = lock_resource
+                return supervisor
+            except BaseException:
+                try:
+                    self._terminate(supervisor)
+                except Exception:
+                    pass
+                if job_handle:
+                    close_supervisor_job(job_handle)
+                raise
+
+        result = self._start_owned_session('operator_command', launch,
+                                            lifetime=lifetime, output_limit=1048576)
         identifier = result['session_id']
         entry = self._sessions[identifier]
+        entry['child_pid'] = entry['process'].pcrc_child_pid
+        entry['supervisor_pid'] = entry['process'].pid
+        entry['job_handle'] = entry['process'].pcrc_job_handle
         entry['input_queue'] = queue.Queue(maxsize=4)
+
+        if entry['job_handle']:
+            def release_job_when_finished():
+                entry['done'].wait()
+                from .session_guard import close_supervisor_job
+                close_supervisor_job(entry['job_handle'])
+                entry['job_handle'] = None
+            threading.Thread(target=release_job_when_finished, daemon=True).start()
+
         threading.Thread(target=self._write_input, args=(entry,), daemon=True).start()
         threading.Thread(target=self._expire_process, args=(identifier,), daemon=True).start()
+        result['pid'] = entry['child_pid']
+        result['supervisor_pid'] = entry['supervisor_pid']
         return result
 
     @staticmethod
