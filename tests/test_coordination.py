@@ -1042,7 +1042,8 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
     release_file = tmp_path / 'release-parent-command'
     grandchild = (
         "import time; "
-        "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
+        "f=open(" + repr(str(pid_file)) + ", 'w'); "
+        "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
         "time.sleep(30)"
     )
     wait_for_grandchild = (
@@ -1100,7 +1101,8 @@ def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
                                  enabled={'files', 'commands', 'browser', 'desktop'})
     grandchild = (
         "import time; "
-        "open(" + repr(pid_file) + ", 'w').write(str(__import__('os').getpid())); "
+        "f=open(" + repr(pid_file) + ", 'w'); "
+        "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
         "time.sleep(30)"
     )
     command = (
@@ -1146,9 +1148,10 @@ def _windows_parent_death_worker(state_dir, workspace, pid_file, connection):
     result = commander.start_program(sys.executable, ['-c', command], timeout_seconds=60)
     connection.send({'child_pid': result['pid']})
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not Path(pid_file).exists():
+    while (time.monotonic() < deadline and
+           (not Path(pid_file).exists() or Path(pid_file).stat().st_size == 0)):
         time.sleep(0.02)
-    if not Path(pid_file).exists():
+    if not Path(pid_file).exists() or Path(pid_file).stat().st_size == 0:
         connection.send({'error': 'grandchild did not start'})
         os._exit(2)
     connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
