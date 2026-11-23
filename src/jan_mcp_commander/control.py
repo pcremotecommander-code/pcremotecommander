@@ -18,7 +18,7 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
-from .core import OperationNotApplied, PermissionDenied
+from .core import OperationNotApplied, OperationNotAppliedFileExists, PermissionDenied
 from .portable import PortableCommander
 from .coordination import coordinated, coordinator, assignment
 
@@ -67,13 +67,23 @@ class ControlCommander(PortableCommander):
     def preview_development_change(self, action, options):
         self._check('commands');self._require_capability('files')
         self._audit('development_preview',True,action)
-        return self._development().preview(action,options)
+        try:
+            return self._development().preview(action,options)
+        except FileExistsError as exc:
+            raise OperationNotAppliedFileExists(str(exc)) from exc
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('workspace')
     def apply_development_change(self, plan_id, review_sha256):
         self._check('commands');self._require_capability('files');self._require_binary_write()
         self._audit('development_apply',True,plan_id)
-        return self._development().apply(plan_id,review_sha256)
+        try:
+            return self._development().apply(plan_id,review_sha256)
+        except ValueError as exc:
+            # The synchronous apply path only validates and queues a worker;
+            # all actual workspace mutations occur later inside guarded steps.
+            raise OperationNotApplied(str(exc)) from exc
 
     def get_development_change(self, plan_id):
         self._check('commands');self._require_capability('files')
