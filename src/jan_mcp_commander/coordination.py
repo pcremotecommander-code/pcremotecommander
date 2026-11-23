@@ -94,11 +94,21 @@ class Coordination:
         changed = []
         for identifier, snapshot in candidates:
             resources = snapshot.get('resources')
+            lock_resources = snapshot.get('lock_resources', resources)
             try:
                 valid_resources = (
                     isinstance(resources, list) and bool(resources)
                     and all(isinstance(item, str) and item for item in resources)
                     and [resource(item) for item in resources] == resources
+                    and isinstance(lock_resources, list) and bool(lock_resources)
+                    and all(
+                        isinstance(item, str) and (
+                            item.startswith('session:') and len(item) == 40
+                            and all(ch in '0123456789abcdef' for ch in item[8:])
+                            or resource(item) == item
+                        )
+                        for item in lock_resources
+                    )
                 )
             except (TypeError, ValueError):
                 valid_resources = False
@@ -108,7 +118,7 @@ class Coordination:
                 continue
             with ExitStack() as locks:
                 acquired_all = True
-                for item in sorted(set(resources)):
+                for item in sorted(set(lock_resources)):
                     acquired = locks.enter_context(self.store.try_resource_locked(item))
                     if not acquired:
                         acquired_all = False
@@ -133,6 +143,63 @@ class Coordination:
                     recovered.append(identifier)
 
         return {'recovered': recovered, 'busy': busy, 'changed': changed}
+
+    def register_detached_operation(self, lock_resource):
+        """Publish a durable workspace reservation backed by a supervisor lock.
+
+        The caller must already be inside a coordinated outer operation. The
+        supervisor acquires its unique lock before this record is published,
+        so recovery cannot mistake a startup gap for a crashed command.
+        """
+        targets = self.depth.get()
+        if not targets:
+            raise CoordinationError('TASK_SCOPE_DENIED', 'Detached commands must start inside a coordinated workspace operation.')
+        if (not isinstance(lock_resource, str) or not lock_resource.startswith('session:')
+                or len(lock_resource) != 40
+                or any(ch not in '0123456789abcdef' for ch in lock_resource[8:])):
+            raise ValueError('Invalid detached session lock identifier')
+        with self.store.locked():
+            data = self.load()
+            self.expire(data)
+            current = assignment.get()
+            task_id = None
+            if current:
+                own = data['tasks'].get(current[0])
+                if own is None:
+                    raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
+                self.validate(own, current[1])
+                if any(not any(covers(allowed, target) for allowed in own['resources'])
+                       for target in targets):
+                    raise CoordinationError('TASK_SCOPE_DENIED', 'Detached command exceeds its task reservation.')
+                task_id = current[0]
+            for task in data['tasks'].values():
+                if task['status'] in {'active', 'needs_review'} and task['id'] != task_id:
+                    if any(overlaps(a, b) for a in task['resources'] for b in targets):
+                        raise CoordinationError('TASK_CONFLICT', 'Another task reserved this detached command resource.')
+            operations = data.setdefault('operations', {})
+            if len(operations) >= MAX_OPERATION_RECORDS:
+                completed = sorted(
+                    ((record.get('finished_at', 0), key) for key, record in operations.items()
+                     if isinstance(record, dict) and record.get('state') in {'completed', 'failed'}),
+                )
+                while len(operations) >= MAX_OPERATION_RECORDS and completed:
+                    _, old_id = completed.pop(0)
+                    operations.pop(old_id, None)
+                if len(operations) >= MAX_OPERATION_RECORDS:
+                    raise CoordinationError('OPERATION_CAPACITY', 'Private operation history is full of unresolved records.')
+            identifier = uuid.uuid4().hex
+            operations[identifier] = {
+                'id': identifier,
+                'state': 'active',
+                'resources': list(targets),
+                'lock_resources': [lock_resource],
+                'owner': {'pid': os.getpid(), 'thread': threading.get_ident()},
+                'task_id': task_id,
+                'started_at': self.clock(),
+                'kind': 'detached_command',
+            }
+            self.save(data)
+            return identifier
 
     def expire(self, data):
         changed = False
