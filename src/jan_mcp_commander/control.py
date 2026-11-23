@@ -412,6 +412,17 @@ class ControlCommander(PortableCommander):
         return {'matches': matches, 'bounded_search': True, 'scanned': scanned}
 
     @coordinated('workspace')
+    def start_session(self, profile):
+        self._check('commands')
+        result = super().start_session(profile)
+        current = assignment.get()
+        if current:
+            entry = self._sessions.get(result.get('session_id'))
+            if entry is not None:
+                entry['task_id'] = current[0]
+        return result
+
+    @coordinated('workspace')
     def start_process(self, command, shell='system', timeout_seconds=300):
         self._check('commands')
         from .privacy import assert_public_text
@@ -674,6 +685,15 @@ class ControlCommander(PortableCommander):
         PortableCommander._terminate(proc)
 
     @staticmethod
+    def _check_session_task_access(entry):
+        current = assignment.get()
+        if current is not None and entry.get('task_id') != current[0]:
+            raise PermissionDenied(
+                'This command session belongs to another task or the unassigned operator. '
+                'Use the matching task assignment or an unassigned operator session.'
+            )
+
+    @staticmethod
     def _write_input(entry):
         try:
             while not entry['done'].is_set():
@@ -699,6 +719,7 @@ class ControlCommander(PortableCommander):
             entry = self._sessions.get(session_id)
             if not entry or entry['profile'] != 'operator_command' or entry['done'].is_set() or entry.get('input_closed'):
                 raise PermissionDenied('Owned command is not accepting input')
+            self._check_session_task_access(entry)
             try:
                 entry['input_queue'].put_nowait((text+('\n' if newline else '')).encode())
             except queue.Full as exc:
@@ -713,6 +734,7 @@ class ControlCommander(PortableCommander):
             entry = self._sessions.get(session_id)
             if not entry or entry['profile'] != 'operator_command':
                 raise PermissionDenied('Unknown owned command')
+            self._check_session_task_access(entry)
             data = bytes(entry['output'][offset:offset+length])
             from .privacy import assert_public_text
             assert_public_text(bytes(entry['output']).decode('utf-8','replace'))
@@ -745,6 +767,8 @@ class ControlCommander(PortableCommander):
 
     def session_output(self, session_id):
         entry = self._sessions.get(session_id)
+        if entry is not None:
+            self._check_session_task_access(entry)
         if entry and entry['profile'] == 'operator_command':
             return self.process_output(session_id)
         return super().session_output(session_id)
@@ -753,6 +777,7 @@ class ControlCommander(PortableCommander):
         entry = self._sessions.get(session_id)
         if entry is None:
             return super().stop_session(session_id)
+        self._check_session_task_access(entry)
         result = super().stop_session(session_id)
         return {
             **result,
