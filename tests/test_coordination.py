@@ -824,7 +824,7 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
 
     other = ControlCommander(pc.workspace, enabled={'files', 'commands', 'browser', 'desktop'})
     try:
-        with other._store.locked():
+        with coordinator(other).store.locked():
             records = [record for record in coordinator(other).load()['operations'].values()
                        if record.get('kind') == 'detached_command'
                        and record.get('state') == 'active']
@@ -836,7 +836,7 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
                 pytest.fail('another commander entered while detached child was running')
 
         assert entry['done'].wait(10)
-        with other._store.locked():
+        with coordinator(other).store.locked():
             completed = coordinator(other).load()['operations'][records[0]['id']]
         assert completed['state'] == 'completed'
         with coordinator(other).guard(['file:after-child-exits.txt']):
