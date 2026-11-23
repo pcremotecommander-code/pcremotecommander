@@ -313,7 +313,7 @@ class Coordination:
         return any(entry.get('task_id') == task_id and not entry['done'].is_set() for entry in self.commander._sessions.values())
 
     @contextmanager
-    def guard(self, resources):
+    def guard(self, resources, *, allow_active_sessions=False):
         targets = sorted(set(resource(item) for item in resources))
         outer_resources = self.depth.get()
         if outer_resources is not None:
@@ -322,6 +322,11 @@ class Coordination:
                 raise CoordinationError('TASK_SCOPE_DENIED', 'A nested operation cannot widen its outer resource reservation.')
             yield
             return
+        if (not allow_active_sessions
+                and any(target == 'workspace' or target.startswith('file:') for target in targets)
+                and any(entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+                        for entry in self.commander._sessions.values())):
+            raise CoordinationError('TASK_CONFLICT', 'An owned command is still running with workspace access. Inspect or stop that session before starting another workspace operation.')
         operation_id = uuid.uuid4().hex
         # Acquire resource locks before publishing the active record. A crash
         # before publication cannot have entered user work; after publication,
@@ -437,7 +442,7 @@ def coordinated(kind, *paths):
         def guarded(self, *args, **kwargs):
             bound = signature.bind(self, *args, **kwargs)
             targets = [resource('file:' + bound.arguments[p]) for p in paths] if paths else [kind]
-            with coordinator(self).guard(targets):
+            with coordinator(self).guard(targets, allow_active_sessions=method.__name__ == 'process_input'):
                 result = method(self, *args, **kwargs)
                 if assignment.get() and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
                     entry = self._sessions.get(result.get('session_id'))
