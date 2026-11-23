@@ -613,6 +613,9 @@ class ControlCommander(PortableCommander):
     @staticmethod
     def _terminate(proc):
         if os.name == 'posix' and getattr(proc, 'pcrc_child_pid', None):
+            # Ask a live supervisor to kill the child process group. If the
+            # supervisor has already crashed, do not signal a bare PID: the
+            # inherited lock remains held until that original child exits.
             if proc.poll() is None:
                 try:
                     proc.send_signal(signal.SIGTERM)
@@ -621,14 +624,11 @@ class ControlCommander(PortableCommander):
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-            try:
-                os.killpg(proc.pcrc_child_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+                    for process_group in (proc.pcrc_child_pid, proc.pid):
+                        try:
+                            os.killpg(process_group, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
             return
         PortableCommander._terminate(proc)
 
