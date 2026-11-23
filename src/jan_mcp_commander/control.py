@@ -589,7 +589,8 @@ class ControlCommander(PortableCommander):
                                 if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
                                         operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)),
-                                        exit_code=supervisor.returncode,\n                                        terminated=getattr(supervisor, 'pcrc_terminated', False))
+                                        exit_code=supervisor.returncode,
+                                        terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     break
                             time.sleep(0.05)
                     finally:
