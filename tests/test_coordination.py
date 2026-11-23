@@ -1061,12 +1061,12 @@ def test_assigned_task_lists_only_its_own_command_sessions(pc):
     pc._sessions['first-session'] = {
         'profile': 'operator_command', 'task_id': first['id'],
         'started': time.monotonic(),
-        'process': SimpleNamespace(pid=101, poll=lambda: None),
+        'process': SimpleNamespace(pid=101, poll=lambda: None, wait=lambda timeout=None: None),
     }
     pc._sessions['second-session'] = {
         'profile': 'operator_command', 'task_id': second['id'],
         'started': time.monotonic(),
-        'process': SimpleNamespace(pid=202, poll=lambda: None),
+        'process': SimpleNamespace(pid=202, poll=lambda: None, wait=lambda timeout=None: None),
     }
     first_view = assigned(first, pc.list_sessions)['sessions']
     second_view = assigned(second, pc.list_sessions)['sessions']
