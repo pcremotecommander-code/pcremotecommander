@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import hashlib
 import sys
 from pathlib import Path
@@ -418,7 +419,6 @@ def test_operation_recovery_does_not_overwrite_a_changed_record(pc, monkeypatch)
                     store.save(latest)
             yield acquired
 
-    from contextlib import contextmanager
     monkeypatch.setattr(store.store, 'try_resource_locked', change_during_probe)
     result = store.recover_operations()
     assert result == {'recovered': [], 'busy': [], 'changed': ['operation-raced']}
