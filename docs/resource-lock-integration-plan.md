@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery and detached-command supervision are implemented on `work/full-concurrency-upgrade`; targeted Windows and Ubuntu CI suites pass. Production remains untouched.
+Status: resource-lock recovery and detached-command supervision are implemented on `work/full-concurrency-upgrade`; targeted Windows and Ubuntu CI suites have passed for the cross-process recovery changes. Linux escaped-descendant containment has been added and its regression CI run is pending. Production remains untouched.
 
 ## Current behavior
 
@@ -35,7 +35,7 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented: development subprocess execution retains its workspace lock for the entire child-process lifetime; synchronous shell commands and browser teaching workflows are coordinated.
 - Implemented: detached `operator_command` sessions receive a durable operation record covering `workspace`, plus separate supervisor and parent-owner lock resources.
 - Implemented: the supervisor holds the session OS lock; on POSIX the child inherits the lock descriptor, so a hard supervisor crash cannot make recovery release the reservation while the child still holds it. The parent also waits for the child process group to exit before marking a successful operation completed.
-- Implemented: on Windows, the supervisor watches a stable handle to the PCRC parent process and terminates the child tree if the parent exits. The parent also keeps a stable child-process handle and a separate owner lock, allowing it to terminate the original child tree if the supervisor crashes.
+- Implemented partially: on Windows, the supervisor watches a stable handle to the PCRC parent process and uses `taskkill /T` plus a stable original-process handle for cleanup. This is not equivalent to a Windows Job Object; descendants that escape the process tree are not guaranteed to be contained.
 - Implemented: a parent-owned lock remains held until supervisor cleanup and operation finalization complete. Recovery probes both lock resources and cannot mistake a helper crash for a completed command.
 - Implemented: detached child and supervisor PIDs are stored in the operation record. Successful exit marks the operation completed; a stop, crash, or nonzero exit requires review and is never replayed.
 - Implemented: stdin control remains available during the detached workspace reservation; ordinary workspace/file operations remain blocked.
@@ -58,6 +58,8 @@ Implement and test only on `work/full-concurrency-upgrade`. Do not merge, deploy
 
 ## Remaining work
 
-- Continue hardening process-identity fencing and escaped-session behavior, including descendants that deliberately create a new session or close inherited descriptors. The current POSIX process-group and inherited-lock approach is conservative for ordinary child trees; it is not an OS sandbox against deliberately daemonizing commands.
+- Complete Linux escaped-descendant regression CI and harden parent-death cleanup so the supervisor cannot release its reservation while a deliberately daemonized descendant remains alive.
+- Implement Windows Job Object containment (kill-on-close, no breakaway, and assignment before the child is resumed); current `taskkill /T` cleanup is best-effort and does not provide a complete process-tree guarantee.
+- Keep the operator-command feature explicitly documented as not being an OS sandbox; process containment does not replace filesystem, network, or privilege isolation.
 - Complete the new Windows and POSIX CI run and resolve any platform-specific failures before declaring detached-command recovery complete.
 - Expand the operation record schema to cover any future asynchronous mutator that can outlive its request thread.
