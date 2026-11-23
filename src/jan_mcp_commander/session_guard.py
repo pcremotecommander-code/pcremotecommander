@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .security import PrivateStore
 
 
-def _parent_death():
+def _parent_death(death_signal=signal.SIGKILL):
     """Return a pre-exec hook that kills this child if its parent disappears."""
     import ctypes
     import ctypes.util
@@ -21,7 +21,7 @@ def _parent_death():
     parent_pid = os.getpid()
 
     def configure():
-        libc.prctl(1, signal.SIGKILL, 0, 0, 0)  # Linux PR_SET_PDEATHSIG
+        libc.prctl(1, death_signal, 0, 0, 0)  # Linux PR_SET_PDEATHSIG
         if os.getppid() != parent_pid:
             os.kill(os.getpid(), signal.SIGKILL)
     return configure
@@ -31,7 +31,7 @@ def _parent_death():
 
 
 def parent_death_preexec():
-    return _parent_death()
+    return _parent_death(signal.SIGTERM)
 
 
 def assign_supervisor_job(process):
@@ -155,7 +155,7 @@ def supervise(config):
 
         options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                    if os.name == "nt" else
-                   {"start_new_session": True, "preexec_fn": _parent_death()})
+                   {"preexec_fn": _parent_death()})
         try:
             child = subprocess.Popen(
                 config["argv"], cwd=config["workspace"], env=os.environ.copy(),
@@ -212,7 +212,18 @@ def supervise(config):
                     pass
 
 
+def _parent_terminated(signum, frame):
+    # The supervisor and its child process tree share one POSIX process group.
+    # Killing the group prevents grandchildren from outliving the reservation.
+    try:
+        os.killpg(os.getpgrp(), signal.SIGKILL)
+    except OSError:
+        os._exit(125)
+
+
 def main():
+    if os.name == "posix":
+        signal.signal(signal.SIGTERM, _parent_terminated)
     try:
         config_line = sys.stdin.buffer.readline(1024 * 1024)
         if not config_line:
