@@ -427,3 +427,23 @@ def test_operation_recovery_does_not_overwrite_a_changed_record(pc, monkeypatch)
         current = store.load()['operations']['operation-raced']
     assert current['state'] == 'active'
     assert current['owner'] == 'owner-b'
+
+
+
+def test_operation_recovery_fails_closed_on_malformed_resource_metadata(pc):
+    store = coordinator(pc)
+    with store.store.locked():
+        data = store.load()
+        data['operations']['operation-malformed'] = {
+            'id': 'operation-malformed',
+            'state': 'active',
+            'resources': ['file:../outside'],
+            'owner': 'unknown',
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    result = store.recover_operations()
+    assert result == {'recovered': [], 'busy': [], 'changed': ['operation-malformed']}
+    with store.store.locked():
+        assert store.load()['operations']['operation-malformed']['state'] == 'active'
