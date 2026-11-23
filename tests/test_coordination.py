@@ -1052,6 +1052,27 @@ def test_workspace_content_search_cannot_escape_file_scoped_task(pc):
     assert error.value.code == 'TASK_SCOPE_DENIED'
 
 
+def test_assigned_task_lists_only_its_own_command_sessions(pc):
+    from types import SimpleNamespace
+    store = coordinator(pc)
+    first = claim(store, 'first session owner', ['file:first.txt'])
+    second = claim(store, 'second session owner', ['file:second.txt'])
+    pc._sessions['first-session'] = {
+        'profile': 'operator_command', 'task_id': first['id'],
+        'process': SimpleNamespace(pid=101, poll=lambda: None),
+    }
+    pc._sessions['second-session'] = {
+        'profile': 'operator_command', 'task_id': second['id'],
+        'process': SimpleNamespace(pid=202, poll=lambda: None),
+    }
+    first_view = assigned(first, pc.list_sessions)['sessions']
+    second_view = assigned(second, pc.list_sessions)['sessions']
+    operator_view = pc.list_sessions()['sessions']
+    assert [item['session_id'] for item in first_view] == ['first-session']
+    assert [item['session_id'] for item in second_view] == ['second-session']
+    assert {item['session_id'] for item in operator_view} == {'first-session', 'second-session'}
+
+
 def test_fixed_profile_session_records_task_owner_and_requires_commands_capability(pc):
     store = coordinator(pc)
     lease = claim(store, 'profile session owner', ['workspace'])
