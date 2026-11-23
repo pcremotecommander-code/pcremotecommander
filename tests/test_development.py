@@ -179,6 +179,16 @@ def test_cancelled_creation_keeps_partial_environment_and_fences_replay(pc,monke
     assert result['status']=='unknown' and result['automatic_retry'] is False
     assert service.marker('.venv')['status']=='creating'
     with pytest.raises(ValueError):service.apply(plan['plan_id'],plan['review_sha256'])
+    # The interrupted subprocess is explicitly reviewed before its uncertain
+    # workspace reservation can be released for the recovery removal.
+    from jan_mcp_commander.coordination import coordinator
+    store=coordinator(pc)
+    with store.store.locked():
+        uncertain=[key for key,value in store.load()['operations'].items()
+                   if value.get('state')=='needs_review' and value.get('resources')==['workspace']]
+    assert uncertain
+    for operation_id in uncertain:
+        store.task('reconcile_operation',operation_id=operation_id,reviewed=True)
     removal=wait(pc,service.preview('environment.remove',{}))
     result=wait(pc,service.apply(removal['plan_id'],removal['review_sha256']))
     assert result['status']=='completed' and not (pc.workspace/'.venv').exists()
