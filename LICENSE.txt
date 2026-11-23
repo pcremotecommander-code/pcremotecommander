@@ -1,0 +1,13 @@
+PC Remote Commander Proprietary Software License
+
+Copyright (c) 2026 pc remote commander. All rights reserved.
+
+This license applies to the PC Remote Commander npm launcher and the PC Remote Commander software it installs, except for third-party components supplied under their own licenses.
+
+You may download, install, and run unmodified PC Remote Commander software to use the PC Remote Commander service. You may make the copies necessary for that installation and use.
+
+You may not modify, redistribute, sublicense, sell, or publish the PC Remote Commander software or its source code without prior written permission from pc remote commander, except where applicable law permits otherwise. You may not remove copyright or license notices.
+
+No other rights are granted. PC Remote Commander names and logos are not licensed by this document. Third-party components remain subject to their own license terms.
+
+The software is provided "as is" without warranties to the extent permitted by applicable law.
