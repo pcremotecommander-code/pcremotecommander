@@ -86,8 +86,10 @@ class ControlCommander(PortableCommander):
             # all actual workspace mutations occur later inside guarded steps.
             raise OperationNotApplied(str(exc)) from exc
 
-    @coordinated('workspace')
     def get_development_change(self, plan_id):
+        # Polling the private operation receipt must remain available while
+        # its detached worker owns the workspace reservation. This method
+        # reads only PCRC state, not workspace files.
         self._check('commands');self._require_capability('files')
         return self._development().get(plan_id)
 
