@@ -236,3 +236,13 @@ def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
                 process.join(timeout=2)
         first_parent.close()
         second_parent.close()
+
+
+
+def test_private_store_try_resource_lock_reports_held_then_available(cmd):
+    store = cmd._store
+    with store.resource_locked('file:recovery-probe.txt'):
+        with store.try_resource_locked('file:recovery-probe.txt') as acquired:
+            assert acquired is False
+    with store.try_resource_locked('file:recovery-probe.txt') as acquired:
+        assert acquired is True
