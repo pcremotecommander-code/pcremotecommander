@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import secrets
+import threading
 import time
 import uuid
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -329,7 +330,7 @@ class Coordination:
                     'id': operation_id,
                     'state': 'active',
                     'resources': targets,
-                    'owner': {'pid': os.getpid(), 'thread': __import__('threading').get_ident()},
+                    'owner': {'pid': os.getpid(), 'thread': threading.get_ident()},
                     'task_id': current[0] if current else None,
                     'started_at': self.clock(),
                 }
