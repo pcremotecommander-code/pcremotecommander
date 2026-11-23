@@ -486,7 +486,7 @@ class ControlCommander(PortableCommander):
         def launch():
             from .session_guard import (
                 create_windows_job_handle, close_windows_job_handle,
-                terminate_windows_job, windows_job_active_processes,
+                terminate_windows_job, terminate_windows_job_and_wait,
             )
             store = coordinator(self).store
             lock_resource = 'session:' + uuid.uuid4().hex
@@ -583,11 +583,7 @@ class ControlCommander(PortableCommander):
                 def finalize_detached_operation():
                     try:
                         if os.name == 'nt' and job_handle:
-                            try:
-                                if windows_job_active_processes(job_handle):
-                                    supervisor.pcrc_terminated = terminate_windows_job(job_handle)
-                            except OSError:
-                                supervisor.pcrc_terminated = terminate_windows_job(job_handle)
+                            supervisor.pcrc_terminated = terminate_windows_job_and_wait(job_handle)
                         # On POSIX the child inherits the supervisor's lock
                         # descriptor. On Windows the parent and supervisor
                         # retain a kill-on-close Job Object for the full tree.
@@ -624,7 +620,7 @@ class ControlCommander(PortableCommander):
                 except Exception:
                     pass
                 if job_handle:
-                    terminate_windows_job(job_handle)
+                    terminate_windows_job_and_wait(job_handle)
                     close_windows_job_handle(job_handle)
                 owner_release.set()
                 raise
