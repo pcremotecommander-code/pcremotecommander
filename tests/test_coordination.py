@@ -1230,11 +1230,6 @@ def test_linux_subreaper_reaps_descendants_across_repeated_fork_races(pc, tmp_pa
         directory.mkdir()
         worker_files = [directory / f'worker-{index}.pid' for index in range(8)]
         grandchild_files = [directory / f'grandchild-{index}.pid' for index in range(8)]
-        grandchild = (
-            "import os,time; "
-            "f=open(" + repr(str(grandchild_files[0])) + ", 'w'); "
-            "f.write(str(os.getpid())); f.flush(); f.close(); time.sleep(30)"
-        )
         worker_codes = []
         for worker_file, grandchild_file in zip(worker_files, grandchild_files):
             grandchild_code = (
@@ -1258,9 +1253,9 @@ def test_linux_subreaper_reaps_descendants_across_repeated_fork_races(pc, tmp_pa
             for code in worker_codes
         )
         wait_for_workers = (
-            "deadline=time.monotonic()+5\\n"
+            "deadline=time.monotonic()+5\n"
             "while not all(os.path.exists(" + repr(str(path)) + ") for path in " +
-            repr([str(path) for path in worker_files]) + ") and time.monotonic()<deadline:\\n"
+            repr([str(path) for path in worker_files]) + ") and time.monotonic()<deadline:\n"
             "    time.sleep(0.002)"
         )
         parent = (
