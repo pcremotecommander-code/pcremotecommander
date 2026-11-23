@@ -916,6 +916,57 @@ def test_detached_grandchild_is_terminated_before_workspace_reservation_releases
     assert records[-1]['state'] == 'needs_review'
 
 
+@pytest.mark.skipif(sys.platform != 'linux', reason='Linux subreaper parent-death containment')
+def test_parent_crash_keeps_reservation_until_escaped_descendants_exit(pc, tmp_path):
+    import multiprocessing
+    import os
+    import select
+    import time
+
+    state_dir = str(pc._store.path)
+    pid_file = tmp_path / 'parent-death-grandchild.pid'
+    context = multiprocessing.get_context('spawn')
+    receive, send = context.Pipe(duplex=False)
+    worker = context.Process(
+        target=_linux_parent_death_worker,
+        args=(state_dir, str(pc.workspace), str(pid_file), send),
+    )
+    worker.start()
+    send.close()
+    try:
+        child_info = receive.recv()
+        assert 'child_pid' in child_info, child_info
+        grandchild_info = receive.recv()
+        assert 'grandchild_pid' in grandchild_info, grandchild_info
+        worker.join(15)
+        assert worker.exitcode == 0
+
+        for pid in (child_info['child_pid'], grandchild_info['grandchild_pid']):
+            pidfd = os.pidfd_open(pid, 0)
+            try:
+                ready, _, _ = select.select([pidfd], [], [], 10)
+                assert ready, f'process {pid} survived PCRC parent death'
+            finally:
+                os.close(pidfd)
+
+        store = coordinator(pc)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            recovery = store.recover_operations()
+            if recovery.get('recovered'):
+                break
+            time.sleep(0.05)
+        with store.store.locked():
+            records = [record for record in store.load()['operations'].values()
+                       if record.get('kind') == 'detached_command']
+        assert records and records[-1]['state'] == 'needs_review'
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(5)
+        receive.close()
+
+
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows Job Object containment')
 def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_path):
     import ctypes
@@ -956,6 +1007,39 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
         records = [record for record in store.load()['operations'].values()
                    if record.get('kind') == 'detached_command']
     assert records[-1]['state'] == 'needs_review'
+
+
+def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
+    import os
+    import time
+    from jan_mcp_commander.control import ControlCommander
+
+    os.environ['JAN_MCP_STATE_DIR'] = state_dir
+    commander = ControlCommander(Path(workspace),
+                                 enabled={'files', 'commands', 'browser', 'desktop'})
+    grandchild = (
+        "import time; "
+        "open(" + repr(pid_file) + ", 'w').write(str(__import__('os').getpid())); "
+        "time.sleep(30)"
+    )
+    command = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
+        "start_new_session=True, close_fds=True, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "time.sleep(30)"
+    )
+    result = commander.start_program(sys.executable, ['-c', command], timeout_seconds=60)
+    connection.send({'child_pid': result['pid']})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not Path(pid_file).exists():
+        time.sleep(0.02)
+    if not Path(pid_file).exists():
+        connection.send({'error': 'grandchild did not start'})
+        os._exit(2)
+    connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
+    # Simulate abrupt PCRC parent death: skip all Python cleanup.
+    os._exit(0)
 
 
 def _cross_process_recovery_worker(state_dir, workspace, start, connection):
