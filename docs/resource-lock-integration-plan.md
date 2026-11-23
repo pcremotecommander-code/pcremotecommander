@@ -49,3 +49,10 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 ## Rollout boundary
 
 Implement and test only on `work/full-concurrency-upgrade`. Do not merge, deploy, publish, alter Cloudflare/Supabase production, or interact with a connected PC as part of this work.
+
+
+## Remaining work
+
+- Add a durable, cross-process lifetime reservation for detached `operator_command` sessions. The current guard blocks workspace operations while sessions are active in the same `ControlCommander` process; it does not yet prove that a detached child process from a crashed PCRC parent has exited.
+- Add process-identity fencing (PID plus creation time or OS process handle) and crash tests before claiming detached-command recovery is complete.
+- Expand the operation record schema to cover any future asynchronous mutator that can outlive its request thread.
