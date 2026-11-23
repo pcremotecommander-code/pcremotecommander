@@ -17,6 +17,7 @@ _CHILD_PID = None
 _PARENT_HANDLE = None
 _PARENT_DEAD = threading.Event()
 _SUPERVISOR_DONE = threading.Event()
+_PARENT_WATCHER = None
 
 
 def _kernel32():
@@ -131,10 +132,13 @@ def _install_parent_death_guard():
         kernel32 = _kernel32()
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.OpenProcess.restype = wintypes.HANDLE
-        _PARENT_HANDLE = kernel32.OpenProcess(0x00100000, False, expected_pid)
+        opened = kernel32.OpenProcess(0x00100000, False, expected_pid)
+        _PARENT_HANDLE = opened if isinstance(opened, int) else getattr(opened, "value", None)
         if not _PARENT_HANDLE:
             raise OSError(ctypes.get_last_error(), "Could not bind supervisor to PCRC parent process")
-        threading.Thread(target=_watch_windows_parent, daemon=True).start()
+        watcher = threading.Thread(target=_watch_windows_parent, daemon=True)
+        watcher.start()
+        globals()["_PARENT_WATCHER"] = watcher
 
 
 def _forward_input(source, destination):
@@ -235,6 +239,8 @@ def main():
         return 125
     finally:
         _SUPERVISOR_DONE.set()
+        if _PARENT_WATCHER is not None:
+            _PARENT_WATCHER.join(timeout=1)
         if _PARENT_HANDLE and os.name == "nt":
             from ctypes import wintypes
             kernel32 = _kernel32()
