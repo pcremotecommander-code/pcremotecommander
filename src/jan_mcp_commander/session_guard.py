@@ -83,6 +83,77 @@ def _kill_windows_tree(pid):
         close_child_process_handle(handle)
 
 
+def _enable_linux_subreaper():
+    """Make orphaned command descendants children of this supervisor on Linux."""
+    if sys.platform != "linux":
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+def _linux_descendants(root_pid):
+    """Return live descendants by walking /proc parent identities."""
+    if sys.platform != "linux":
+        return []
+    parents = {}
+    try:
+        entries = os.scandir("/proc")
+    except OSError:
+        return []
+    with entries:
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = Path(entry.path, "stat").read_text()
+                fields = raw[raw.rfind(")") + 1:].split()
+                parents[int(entry.name)] = int(fields[1])
+            except (OSError, ValueError, IndexError):
+                continue
+    descendants = set()
+    frontier = {root_pid}
+    while frontier:
+        children = {pid for pid, parent in parents.items()
+                    if parent in frontier and pid not in descendants}
+        if not children:
+            break
+        descendants.update(children)
+        frontier = children
+    return sorted(descendants, reverse=True)
+
+
+def _terminate_linux_descendants():
+    """Kill and reap command descendants adopted by the Linux subreaper."""
+    if sys.platform != "linux":
+        return False
+    terminated = False
+    # Repeat to catch a descendant that forks while an earlier snapshot is
+    # being terminated. The command's direct child has already exited here.
+    for _ in range(10):
+        descendants = _linux_descendants(os.getpid())
+        if not descendants:
+            break
+        for pid in descendants:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                terminated = True
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                terminated = True  # Fail closed: do not report clean completion.
+        deadline = __import__("time").monotonic() + 0.2
+        while __import__("time").monotonic() < deadline:
+            try:
+                pid, _ = os.waitpid(-1, os.WNOHANG)
+                if pid == 0:
+                    __import__("time").sleep(0.01)
+            except ChildProcessError:
+                break
+    return terminated
+
+
 def _parent_terminated(signum, frame):
     # POSIX child commands have their own process group. Killing that complete
     # group prevents descendants from outliving the supervisor reservation.
@@ -180,6 +251,7 @@ def _forward_input(source, destination, child_done):
 
 def supervise(config):
     global _CHILD_PGID, _CHILD_PID
+    _enable_linux_subreaper()
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
     lock_resource = config["lock_resource"]
     with store.resource_locked_handoff(lock_resource) as lock_fd:
@@ -227,7 +299,13 @@ def supervise(config):
                     break
                 sys.stdout.buffer.write(packet)
                 sys.stdout.buffer.flush()
-            return child.wait()
+            exit_code = child.wait()
+            if os.name == "posix" and _terminate_linux_descendants():
+                # The requested command left background descendants behind.
+                # They were terminated, so require review rather than treating
+                # the operation as a clean completion.
+                return 125
+            return exit_code
         finally:
             child_done.set()
             input_thread.join()
