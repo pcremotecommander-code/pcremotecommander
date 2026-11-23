@@ -200,6 +200,43 @@ def _resource_lock_process_worker(state_dir, workspace, connection):
         connection.close()
 
 
+
+def _resource_lock_crash_worker(state_dir, workspace, connection):
+    store = PrivateStore(state_dir, workspace)
+    with store.resource_locked('file:crash-recovery.txt'):
+        connection.send('acquired')
+        connection.recv()
+
+
+def test_private_store_resource_lock_recovers_after_process_crash(tmp_path):
+    import multiprocessing
+    ctx = multiprocessing.get_context('spawn')
+    workspace = tmp_path / 'workspace'
+    state_dir = tmp_path / 'private-state'
+    workspace.mkdir()
+    store = PrivateStore(state_dir, workspace)
+    parent, child = ctx.Pipe()
+    process = ctx.Process(target=_resource_lock_crash_worker,
+                          args=(state_dir, workspace, child))
+    process.start()
+    try:
+        assert parent.poll(8), 'Child did not acquire resource lock'
+        assert parent.recv() == 'acquired'
+        with store.try_resource_locked('file:crash-recovery.txt') as acquired:
+            assert acquired is False, 'Live child lock was not detected'
+        process.terminate()
+        process.join(timeout=5)
+        assert not process.is_alive(), 'Child process did not terminate'
+        with store.try_resource_locked('file:crash-recovery.txt') as acquired:
+            assert acquired is True, 'OS lock remained held after child process exit'
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
+        parent.close()
+        child.close()
+
+
 def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
     import multiprocessing
     ctx = multiprocessing.get_context('spawn')
