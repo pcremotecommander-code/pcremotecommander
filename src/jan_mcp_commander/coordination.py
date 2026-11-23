@@ -146,6 +146,173 @@ class Coordination:
 
         return {'recovered': recovered, 'busy': busy, 'changed': changed}
 
+    def _hold_review_operation_locks(self, stack, operation):
+        resources = operation.get('resources')
+        lock_resources = operation.get('lock_resources', resources)
+        try:
+            valid = (
+                isinstance(resources, list) and bool(resources)
+                and all(isinstance(item, str) and item for item in resources)
+                and [resource(item) for item in resources] == resources
+                and isinstance(lock_resources, list) and bool(lock_resources)
+                and all(
+                    isinstance(item, str) and (
+                        (item.startswith('session:') and len(item) == 40
+                         and all(ch in '0123456789abcdef' for ch in item[8:]))
+                        or (item.startswith('session-owner:') and len(item) == 46
+                            and all(ch in '0123456789abcdef' for ch in item[14:]))
+                        or resource(item) == item
+                    )
+                    for item in lock_resources
+                )
+            )
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise CoordinationError(
+                'TASK_REVIEW_REQUIRED',
+                'Operation lock metadata is malformed. Inspect private coordination state; no reservation was released.',
+            )
+        for item in sorted(set(lock_resources)):
+            acquired = stack.enter_context(self.store.try_resource_locked(item))
+            if not acquired:
+                raise CoordinationError(
+                    'TASK_REVIEW_REQUIRED',
+                    'Operation still holds a resource lock. Wait for it to stop before reconciliation.',
+                )
+
+    def reconcile_operation(self, identifier, reviewed):
+        self.recover_operations()
+        if reviewed is not True:
+            raise CoordinationError(
+                'TASK_REVIEW_REQUIRED',
+                'Inspect the operation effects and explicitly confirm reviewed=true. No action will be replayed.',
+            )
+        with self.store.locked():
+            snapshot = self.load().get('operations', {}).get(identifier)
+            if not isinstance(snapshot, dict) or snapshot.get('state') != 'needs_review':
+                raise CoordinationError(
+                    'TASK_REVIEW_REQUIRED',
+                    'Operation is not in a reviewable state. Live or malformed operations cannot be released.',
+                )
+            snapshot = dict(snapshot)
+
+        with ExitStack() as locks:
+            self._hold_review_operation_locks(locks, snapshot)
+            with self.store.locked():
+                data = self.load()
+                operation = data.get('operations', {}).get(identifier)
+                if operation != snapshot or operation.get('state') != 'needs_review':
+                    raise CoordinationError(
+                        'TASK_REVIEW_REQUIRED',
+                        'Operation changed during reconciliation. Inspect it again; no reservation was released.',
+                    )
+                operation.update(
+                    state='abandoned_after_review',
+                    reviewed_at=self.clock(),
+                    note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.',
+                )
+                self.promote(data)
+                self.save(data)
+                return {
+                    'operation_id': identifier,
+                    'state': operation['state'],
+                    'task_id': operation.get('task_id'),
+                }
+
+    def reconcile_task(self, task_id, reviewed):
+        self.recover_operations()
+        if reviewed is not True:
+            raise CoordinationError(
+                'TASK_REVIEW_REQUIRED',
+                'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.',
+            )
+        with self.store.locked():
+            data = self.load()
+            self.expire(data)
+            task = data['tasks'].get(task_id)
+            if task is None:
+                raise CoordinationError('TASK_NOT_FOUND', 'Task not found. Call list_tasks and use its task ID.')
+            unresolved = [
+                run for run in data['runs'].values()
+                if run['task_id'] == task_id and run['status'] in {'unknown', 'failed'}
+            ]
+            operations = [
+                (identifier, dict(operation))
+                for identifier, operation in data.get('operations', {}).items()
+                if isinstance(operation, dict) and operation.get('task_id') == task_id
+                and operation.get('state') in {'active', 'needs_review'}
+            ]
+            if any(operation.get('state') == 'active' for _, operation in operations):
+                raise CoordinationError(
+                    'TASK_REVIEW_REQUIRED',
+                    'A coordinated operation still holds its resource lock. Wait for it to finish or stop; no reservation will be released.',
+                )
+            eligible = (
+                task['status'] == 'needs_review'
+                or task['status'] == 'active' and (unresolved or operations)
+            )
+            if not eligible or self.running(task_id):
+                raise CoordinationError(
+                    'TASK_REVIEW_REQUIRED',
+                    'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.',
+                )
+            task_identity = (task['id'], task.get('revision'), task.get('lease_token'))
+
+        with ExitStack() as locks:
+            for _, operation in operations:
+                self._hold_review_operation_locks(locks, operation)
+            with self.store.locked():
+                data = self.load()
+                self.expire(data)
+                task = data['tasks'].get(task_id)
+                if task is None or (
+                    task['id'], task.get('revision'), task.get('lease_token')
+                ) != task_identity:
+                    raise CoordinationError(
+                        'TASK_REVIEW_REQUIRED',
+                        'Task assignment changed during reconciliation. Inspect it again; no reservation was released.',
+                    )
+                unresolved_now = [
+                    run for run in data['runs'].values()
+                    if run['task_id'] == task_id and run['status'] in {'unknown', 'failed'}
+                ]
+                operations_now = [
+                    (identifier, operation)
+                    for identifier, operation in data.get('operations', {}).items()
+                    if isinstance(operation, dict) and operation.get('task_id') == task_id
+                    and operation.get('state') in {'active', 'needs_review'}
+                ]
+                if (
+                    any(operation.get('state') == 'active' for _, operation in operations_now)
+                    or [(identifier, operation) for identifier, operation in operations_now]
+                    != operations
+                    or not (
+                        task['status'] == 'needs_review'
+                        or task['status'] == 'active' and (unresolved_now or operations_now)
+                    )
+                    or self.running(task_id)
+                ):
+                    raise CoordinationError(
+                        'TASK_REVIEW_REQUIRED',
+                        'Task or operation state changed during reconciliation. Inspect it again; no reservation was released.',
+                    )
+                for run in unresolved_now:
+                    run['status'] = 'abandoned_after_review'
+                for _, operation in operations_now:
+                    operation.update(
+                        state='abandoned_after_review',
+                        reviewed_at=self.clock(),
+                        note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.',
+                    )
+                task.update(status='queued', resources=[], lease_token='')
+                if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task_id:
+                    self.commander._teaching = None
+                self.promote(data)
+                self.save(data)
+                return self.public(task)
+
+
     def register_detached_operation(self, lock_resource, owner_lock_resource, *, supervisor_pid=None):
         """Publish a durable workspace reservation backed by a supervisor lock.
 
@@ -290,28 +457,14 @@ class Coordination:
         return {key: value for key, value in task.items() if key != 'lease_token'}
 
     def task(self, action, **args):
-        # Probe OS locks before entering the metadata transaction.
-        if action in {'reconcile', 'reconcile_operation'}:
-            self.recover_operations()
+        if action == 'reconcile_operation':
+            return self.reconcile_operation(args.get('operation_id'), args.get('reviewed'))
+        if action == 'reconcile':
+            return self.reconcile_task(args.get('task_id'), args.get('reviewed'))
         with self.store.locked():
             data = self.load()
             self.expire(data)
             tasks = data['tasks']
-            if action == 'reconcile_operation':
-                identifier = args.get('operation_id')
-                operation = data.get('operations', {}).get(identifier)
-                if not isinstance(operation, dict) or operation.get('state') != 'needs_review':
-                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Operation is not in a reviewable state. Live or malformed operations cannot be released.')
-                if args.get('reviewed') is not True:
-                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the operation effects and explicitly confirm reviewed=true. No action will be replayed.')
-                operation.update(
-                    state='abandoned_after_review',
-                    reviewed_at=self.clock(),
-                    note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.',
-                )
-                self.promote(data)
-                self.save(data)
-                return {'operation_id': identifier, 'state': operation['state'], 'task_id': operation.get('task_id')}
             if action == 'list':
                 held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
                 recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
@@ -389,24 +542,6 @@ class Coordination:
                     if not isinstance(note, str) or len(note) > 2000:
                         raise ValueError('Handoff note exceeds limit')
                     task['note'] = note
-                self.promote(data)
-                self.save(data)
-                return self.public(task)
-            if action == 'reconcile':
-                live_operations = [identifier for identifier, operation in unresolved_operations if operation.get('state') == 'active']
-                if live_operations:
-                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation still holds its resource lock. Wait for it to finish or stop; no reservation will be released.')
-                eligible_for_review = (task['status'] == 'needs_review' or task['status'] == 'active' and (unresolved or unresolved_operations))
-                if not eligible_for_review or args.get('reviewed') is not True or self.running(task['id']):
-                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.')
-                for run in unresolved:
-                    run['status'] = 'abandoned_after_review'
-                for identifier, operation in unresolved_operations:
-                    if operation.get('state') == 'needs_review':
-                        operation.update(state='abandoned_after_review', reviewed_at=self.clock(), note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.')
-                task.update(status='queued', resources=[], lease_token='')
-                if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
-                    self.commander._teaching = None
                 self.promote(data)
                 self.save(data)
                 return self.public(task)
