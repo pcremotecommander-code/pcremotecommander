@@ -143,7 +143,7 @@ def supervise(config):
     with store.resource_locked(config["lock_resource"]):
         # Parent has not authorized the command to start yet. EOF means the
         # caller died or abandoned startup, so no user process is launched.
-        sys.stdout.write(json.dumps({"locked": True}) + "\\n")
+        sys.stdout.write(json.dumps({"locked": True}) + "\n")
         sys.stdout.flush()
         launch = sys.stdin.buffer.readline(4096)
         if not launch:
@@ -176,7 +176,7 @@ def supervise(config):
                         nonce, raw, store.context), overwrite=True)
             raise
         config["operation_id"] = operation_id
-        sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\\n")
+        sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
         sys.stdout.flush()
         input_thread = threading.Thread(
             target=_forward_input,
@@ -221,7 +221,7 @@ def main():
         return supervise(config)
     except BaseException as exc:
         try:
-            sys.stderr.write(json.dumps({"supervisor_error": type(exc).__name__}) + "\\n")
+            sys.stderr.write(json.dumps({"supervisor_error": type(exc).__name__}) + "\n")
             sys.stderr.flush()
         except Exception:
             pass
