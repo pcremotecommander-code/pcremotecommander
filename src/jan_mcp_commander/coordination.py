@@ -144,7 +144,7 @@ class Coordination:
 
         return {'recovered': recovered, 'busy': busy, 'changed': changed}
 
-    def register_detached_operation(self, lock_resource):
+    def register_detached_operation(self, lock_resource, *, supervisor_pid=None):
         """Publish a durable workspace reservation backed by a supervisor lock.
 
         The caller must already be inside a coordinated outer operation. The
@@ -193,7 +193,8 @@ class Coordination:
                 'state': 'active',
                 'resources': list(targets),
                 'lock_resources': [lock_resource],
-                'owner': {'pid': os.getpid(), 'thread': threading.get_ident()},
+                'owner': {'pid': os.getpid(), 'thread': threading.get_ident(),
+                          'supervisor_pid': supervisor_pid},
                 'task_id': task_id,
                 'started_at': self.clock(),
                 'kind': 'detached_command',
