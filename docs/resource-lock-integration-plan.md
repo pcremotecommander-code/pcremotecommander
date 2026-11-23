@@ -30,6 +30,8 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented/tested: independent file operations overlap in time when their canonical resources do not overlap.
 - Implemented/tested: operation registration blocks a conflicting task claim until the operation releases its reservation.
 - Implemented/tested: nested calls cannot widen their outer resource scope.
+- Implemented: task handoff refuses to release a lease with active or review-required operation records.
+- Implemented: task reconciliation first probes active operation locks, refuses while an operation is live, and only archives uncertain operation records after explicit review.
 - Implemented/tested: live operations remain active during recovery probes; abandoned records become needs_review; changed or malformed records fail closed.
 - Same-file and parent/child operations serialize.
 - Workspace conflicts with every file operation; UI remains exclusive.
