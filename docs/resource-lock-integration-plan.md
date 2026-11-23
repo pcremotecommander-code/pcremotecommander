@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. The Windows Job Object and Linux escaped-grandchild tests passed in targeted Ubuntu and Windows CI. Linux parent-death escaped-descendant coverage has now been added and is awaiting CI. Production remains untouched.
+Status: resource-lock recovery, Linux descendant cleanup, and Windows Job Object containment are implemented on `work/full-concurrency-upgrade`. Linux escaped-grandchild and parent-death tests passed in Ubuntu CI. The Windows Job Object descendant test exposed a test synchronization race; that race has been corrected, and the workflow now uses Bash so pytest failures cannot be masked by PowerShell native-command exit handling. A fresh Windows run is pending. Production remains untouched.
 
 ## Current behavior
 
@@ -36,7 +36,7 @@ Likewise, task reservations are durable leases, while resource locks are ephemer
 - Implemented: detached `operator_command` sessions receive a durable operation record covering `workspace`, plus separate supervisor and parent-owner lock resources.
 - Implemented on Linux: subreaper mode is enabled before installing the parent-death signal handler. If the PCRC parent dies, the supervisor kills and reaps all descendants, including daemonized descendants that create a new session and close inherited descriptors, before exiting and releasing its reservation. Process identities are checked using `/proc` start times and pidfds where available. Regression coverage for both normal completion and abrupt parent death has been added; the parent-death test is awaiting CI.
 - Other POSIX platforms still rely on process-group cleanup and do not receive the Linux subreaper guarantee; detached-command containment must be described as platform-dependent.
-- Implemented and targeted CI passed: on Windows, PCRC creates an inheritable Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, passes only that handle to the supervisor, creates the command process suspended, assigns it to the Job Object before resuming its primary thread, and retains handles in both the PCRC parent and supervisor. No breakaway flags are enabled. The supervisor terminates remaining job members after the direct command exits; the parent also terminates the job if the supervisor exits unexpectedly. A Windows regression test launches a grandchild and verifies it is terminated before the workspace reservation is released.
+- Implemented; regression re-verification pending: on Windows, PCRC creates an inheritable Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, passes only that handle to the supervisor, creates the command process suspended, assigns it to the Job Object before resuming its primary thread, and retains handles in both the PCRC parent and supervisor. No breakaway flags are enabled. The supervisor terminates remaining job members after the direct command exits; the parent also terminates the job if the supervisor exits unexpectedly. The Windows regression test waits for a grandchild to start before verifying that it is terminated before the workspace reservation is released.
 - Implemented: a parent-owned lock remains held until supervisor cleanup and operation finalization complete. Recovery probes both lock resources and cannot mistake a helper crash for a completed command.
 - Implemented: detached child and supervisor PIDs are stored in the operation record. Successful exit marks the operation completed; a stop, crash, or nonzero exit requires review and is never replayed.
 - Implemented: stdin control remains available during the detached workspace reservation; ordinary workspace/file operations remain blocked.
@@ -60,7 +60,7 @@ Implement and test only on `work/full-concurrency-upgrade`. Do not merge, deploy
 ## Remaining work
 
 - Complete Linux parent-death escaped-descendant CI verification and inspect the process-identity/pidfd cleanup behavior under repeated fork races.
-- Complete Windows Job Object verification for parent/supervisor crash cleanup and nested-job compatibility on supported Windows versions. The Job Object is process-tree containment, not a general OS sandbox.
+- Complete the corrected Windows Job Object regression run with fail-fast CI, then add explicit parent/supervisor crash and nested-job compatibility tests on supported Windows versions. The Job Object is process-tree containment, not a general OS sandbox.
 - Keep the operator-command feature explicitly documented as not being an OS sandbox; process containment does not replace filesystem, network, or privilege isolation.
 - Complete the latest Windows and POSIX CI runs and resolve any platform-specific failures before declaring detached-command recovery complete.
 - Expand the operation record schema to cover any future asynchronous mutator that can outlive its request thread.
