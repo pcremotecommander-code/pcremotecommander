@@ -586,7 +586,7 @@ class ControlCommander(PortableCommander):
                                         group_alive = True
                                 if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
-                                        operation_id, success=supervisor.returncode == 0)
+                                        operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)))
                                     break
                             time.sleep(0.05)
                     finally:
@@ -626,6 +626,7 @@ class ControlCommander(PortableCommander):
             # supervisor has already crashed, do not signal a bare PID: the
             # inherited lock remains held until that original child exits.
             if proc.poll() is None:
+                proc.pcrc_terminated = True
                 try:
                     proc.send_signal(signal.SIGTERM)
                 except OSError:
@@ -638,6 +639,16 @@ class ControlCommander(PortableCommander):
                             os.killpg(process_group, signal.SIGKILL)
                         except ProcessLookupError:
                             pass
+            else:
+                # A surviving process group cannot have its numeric PGID
+                # reused while any member remains, so verify it still exists.
+                try:
+                    os.killpg(proc.pcrc_child_pid, 0)
+                except ProcessLookupError:
+                    pass
+                else:
+                    proc.pcrc_terminated = True
+                    os.killpg(proc.pcrc_child_pid, signal.SIGKILL)
             return
         PortableCommander._terminate(proc)
 
