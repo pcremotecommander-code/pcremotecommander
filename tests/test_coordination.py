@@ -535,3 +535,72 @@ def test_operation_reservation_does_not_consume_active_task_quota(pc):
         claimed = store.task('claim', task_id=task['id'], agent='worker',
                              resources=['file:eighth-task.txt'])
         assert claimed['status'] == 'active'
+
+
+
+def test_task_handoff_and_reconciliation_require_operation_review(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'operation-owned task', ['file:operation.txt'])
+    with store.store.locked():
+        data = store.load()
+        data['operations']['uncertain-operation'] = {
+            'id': 'uncertain-operation',
+            'state': 'needs_review',
+            'resources': ['file:operation.txt'],
+            'owner': {'pid': 999999, 'thread': 1},
+            'task_id': lease['id'],
+            'started_at': 1000,
+            'note': 'simulated interrupted write',
+        }
+        store.save(data)
+
+    with pytest.raises(CoordinationError, match='coordinated operation'):
+        store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'],
+                   status='completed')
+
+    with pytest.raises(CoordinationError, match='confirm reconciliation'):
+        store.task('reconcile', task_id=lease['id'], reviewed=False)
+
+    reconciled = store.task('reconcile', task_id=lease['id'], reviewed=True)
+    assert reconciled['status'] == 'queued'
+    with store.store.locked():
+        operation = store.load()['operations']['uncertain-operation']
+    assert operation['state'] == 'abandoned_after_review'
+    assert operation['task_id'] == lease['id']
+
+
+def test_task_reconciliation_cannot_release_live_operation_lock(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'live operation task', ['file:live-operation.txt'])
+    entered = __import__('threading').Event()
+    release = __import__('threading').Event()
+
+    def hold_resource():
+        with store.store.resource_locked('file:live-operation.txt'):
+            entered.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(hold_resource)
+        assert entered.wait(5)
+        with store.store.locked():
+            data = store.load()
+            data['operations']['still-live'] = {
+                'id': 'still-live',
+                'state': 'active',
+                'resources': ['file:live-operation.txt'],
+                'owner': {'pid': 999999, 'thread': 2},
+                'task_id': lease['id'],
+                'started_at': 1000,
+            }
+            store.save(data)
+        try:
+            with pytest.raises(CoordinationError, match='still holds its resource lock'):
+                store.task('reconcile', task_id=lease['id'], reviewed=True)
+            with store.store.locked():
+                assert store.load()['operations']['still-live']['state'] == 'active'
+            assert store.task('renew', task_id=lease['id'],
+                              lease_token=lease['lease_token'])['status'] == 'active'
+        finally:
+            release.set()
+            future.result(timeout=5)
