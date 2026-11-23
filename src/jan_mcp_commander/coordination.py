@@ -92,9 +92,15 @@ class Coordination:
         changed = []
         for identifier, snapshot in candidates:
             resources = snapshot.get('resources')
-            if (not isinstance(resources, list) or not resources
-                    or any(not isinstance(item, str) or not item or resource(item) != item
-                           for item in resources)):
+            try:
+                valid_resources = (
+                    isinstance(resources, list) and bool(resources)
+                    and all(isinstance(item, str) and item for item in resources)
+                    and [resource(item) for item in resources] == resources
+                )
+            except (TypeError, ValueError):
+                valid_resources = False
+            if not valid_resources:
                 # Malformed metadata is not safe to release or reinterpret.
                 changed.append(identifier)
                 continue
