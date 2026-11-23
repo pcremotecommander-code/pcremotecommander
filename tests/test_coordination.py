@@ -691,6 +691,45 @@ def test_task_reconciliation_cannot_release_needs_review_operation_with_live_loc
         assert store.load()['operations']['reviewed-task-live']['state'] == 'abandoned_after_review'
 
 
+def test_task_reconciliation_rechecks_new_uncertain_runs_before_release(pc, monkeypatch):
+    store = coordinator(pc)
+    lease = claim(store, 'reconciliation run race', ['file:run-race.txt'])
+    with store.store.locked():
+        data = store.load()
+        data['operations']['run-race-operation'] = {
+            'id': 'run-race-operation',
+            'state': 'needs_review',
+            'resources': ['file:run-race.txt'],
+            'owner': {'pid': 999999, 'thread': 6},
+            'task_id': lease['id'],
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    original = store._hold_review_operation_locks
+
+    def add_uncertain_run(stack, operation):
+        original(stack, operation)
+        with store.store.locked():
+            data = store.load()
+            data['runs']['late-uncertain-run'] = {
+                'task_id': lease['id'],
+                'status': 'unknown',
+                'workflow': {'step': 'write'},
+            }
+            store.save(data)
+
+    monkeypatch.setattr(store, '_hold_review_operation_locks', add_uncertain_run)
+    with pytest.raises(CoordinationError, match='changed during reconciliation'):
+        store.task('reconcile', task_id=lease['id'], reviewed=True)
+
+    with store.store.locked():
+        data = store.load()
+        assert data['tasks'][lease['id']]['status'] == 'active'
+        assert data['operations']['run-race-operation']['state'] == 'needs_review'
+        assert data['runs']['late-uncertain-run']['status'] == 'unknown'
+
+
 def test_reconciliation_cannot_reopen_a_finished_task_for_late_operation_record(pc):
     store = coordinator(pc)
     lease = claim(store, 'finished task', ['file:finished.txt'])
