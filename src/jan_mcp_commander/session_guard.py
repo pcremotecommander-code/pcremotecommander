@@ -78,7 +78,8 @@ def assign_supervisor_job(process):
                     ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
     job = kernel32.CreateJobObjectW(None, None)
-    if not job:
+    job_value = job if isinstance(job, int) else getattr(job, "value", None)
+    if not job_value:
         raise ctypes.WinError(ctypes.get_last_error())
     info = EXTENDED_LIMIT()
     info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
@@ -91,7 +92,7 @@ def assign_supervisor_job(process):
         error = ctypes.get_last_error()
         kernel32.CloseHandle(job)
         raise ctypes.WinError(error)
-    return int(job)
+    return job_value
 
 
 def close_supervisor_job(handle):
