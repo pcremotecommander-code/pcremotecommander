@@ -1033,6 +1033,55 @@ def test_windows_parent_crash_terminates_job_descendants(pc, tmp_path):
         parent.close()
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows nested Job Object compatibility')
+def test_windows_detached_command_runs_inside_existing_parent_job(pc):
+    import ctypes
+    import multiprocessing
+    from ctypes import wintypes
+    from jan_mcp_commander.session_guard import create_windows_job_handle, close_windows_job_handle
+
+    context = multiprocessing.get_context('spawn')
+    receive, send = context.Pipe(duplex=True)
+    worker = context.Process(
+        target=_windows_nested_job_worker,
+        args=(str(pc._store.path), str(pc.workspace), send),
+    )
+    parent_job = create_windows_job_handle()
+    process_handle = None
+    try:
+        worker.start()
+        send.close()
+        assert receive.recv() == {'ready': True}
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        process_handle = kernel32.OpenProcess(
+            0x0100 | 0x0001 | 0x0400, False, worker.pid)  # SET_QUOTA | TERMINATE | QUERY
+        assert process_handle, 'could not open nested-job worker process'
+        if not kernel32.AssignProcessToJobObject(wintypes.HANDLE(parent_job), process_handle):
+            error = ctypes.get_last_error()
+            raise AssertionError(f'Windows runner does not permit nested Job Objects (error {error})')
+
+        receive.send(True)
+        result = receive.recv()
+        assert 'error' not in result, result
+        assert result['exit_code'] == 0, result
+        assert 'nested-job-ok' in result['output'], result
+        worker.join(15)
+        assert worker.exitcode == 0
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(5)
+        if process_handle:
+            kernel32.CloseHandle(process_handle)
+        close_windows_job_handle(parent_job)
+        receive.close()
+
+
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows Job Object containment')
 def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_path):
     import ctypes
@@ -1238,6 +1287,34 @@ def _windows_parent_death_worker(state_dir, workspace, pid_file, connection):
     # The test opens stable process handles before allowing abrupt parent exit.
     connection.recv()
     os._exit(0)
+
+
+def _windows_nested_job_worker(state_dir, workspace, connection):
+    import os
+    from jan_mcp_commander.control import ControlCommander
+
+    os.environ['JAN_MCP_STATE_DIR'] = state_dir
+    connection.send({'ready': True})
+    if connection.recv() is not True:
+        os._exit(3)
+    commander = ControlCommander(Path(workspace),
+                                 enabled={'files', 'commands', 'browser', 'desktop'})
+    try:
+        result = commander.start_program(
+            sys.executable, ['-c', "print('nested-job-ok')"], timeout_seconds=15)
+        entry = commander._sessions[result['session_id']]
+        if not entry['done'].wait(15):
+            connection.send({'error': 'nested Job Object command did not finish'})
+            os._exit(4)
+        connection.send({
+            'exit_code': entry['process'].poll(),
+            'output': commander.process_output(result['session_id'])['output'],
+        })
+    except BaseException as exc:
+        connection.send({'error': type(exc).__name__, 'message': str(exc)})
+        os._exit(5)
+    finally:
+        commander.close_control()
 
 
 def _cross_process_recovery_worker(state_dir, workspace, start, connection):
