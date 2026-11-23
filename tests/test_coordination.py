@@ -916,6 +916,48 @@ def test_detached_grandchild_is_terminated_before_workspace_reservation_releases
     assert records[-1]['state'] == 'needs_review'
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows Job Object containment')
+def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_path):
+    import ctypes
+    import time
+
+    store = coordinator(pc)
+    pid_file = tmp_path / 'job-descendant.pid'
+    grandchild = (
+        "import time; "
+        "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
+        "time.sleep(30)"
+    )
+    parent = (
+        "import subprocess,sys; "
+        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=10)
+    entry = pc._sessions[result['session_id']]
+    assert entry['done'].wait(15)
+    assert pid_file.exists(), 'Job Object descendant did not start'
+    pid = int(pid_file.read_text())
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    assert handle, 'could not open descendant process for exit verification'
+    try:
+        assert kernel32.WaitForSingleObject(handle, 5000) == 0, (
+            'descendant remained alive after direct command exit'
+        )
+    finally:
+        kernel32.CloseHandle(handle)
+    with store.store.locked():
+        records = [record for record in store.load()['operations'].values()
+                   if record.get('kind') == 'detached_command']
+    assert records[-1]['state'] == 'needs_review'
+
+
 def _cross_process_recovery_worker(state_dir, workspace, start, connection):
     from types import SimpleNamespace
     from jan_mcp_commander.coordination import Coordination
