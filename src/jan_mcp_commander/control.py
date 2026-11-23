@@ -647,6 +647,17 @@ class ControlCommander(PortableCommander):
             return self.process_output(session_id)
         return super().session_output(session_id)
 
+    def stop_session(self, session_id):
+        entry = self._sessions.get(session_id)
+        if entry is None:
+            return super().stop_session(session_id)
+        result = super().stop_session(session_id)
+        return {
+            **result,
+            'pid': entry.get('child_pid', result['pid']),
+            'supervisor_pid': entry.get('supervisor_pid', result['pid']),
+        }
+
     def list_sessions(self):
         if any(entry['profile'] == 'operator_command' for entry in self._sessions.values()):
             self._check('commands')
