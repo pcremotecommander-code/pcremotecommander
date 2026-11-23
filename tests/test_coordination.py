@@ -970,6 +970,67 @@ def test_parent_crash_keeps_reservation_until_escaped_descendants_exit(pc, tmp_p
         receive.close()
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows Job Object parent-death containment')
+def test_windows_parent_crash_terminates_job_descendants(pc, tmp_path):
+    import ctypes
+    import multiprocessing
+    import time
+
+    pid_file = tmp_path / 'windows-parent-death-grandchild.pid'
+    context = multiprocessing.get_context('spawn')
+    parent, child = context.Pipe(duplex=True)
+    worker = context.Process(
+        target=_windows_parent_death_worker,
+        args=(str(pc._store.path), str(pc.workspace), str(pid_file), child),
+    )
+    worker.start()
+    child.close()
+    handles = []
+    try:
+        child_info = parent.recv()
+        assert 'child_pid' in child_info, child_info
+        grandchild_info = parent.recv()
+        assert 'grandchild_pid' in grandchild_info, grandchild_info
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        for pid in (child_info['child_pid'], grandchild_info['grandchild_pid']):
+            handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            assert handle, f'could not open live process {pid} before parent death'
+            handles.append(handle)
+
+        parent.send('exit')
+        worker.join(15)
+        assert worker.exitcode == 0
+        for handle in handles:
+            assert kernel32.WaitForSingleObject(handle, 10000) == 0, (
+                'a Job Object descendant survived PCRC parent death'
+            )
+
+        store = coordinator(pc)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            recovery = store.recover_operations()
+            if recovery.get('recovered'):
+                break
+            time.sleep(0.05)
+        with store.store.locked():
+            records = [record for record in store.load()['operations'].values()
+                       if record.get('kind') == 'detached_command']
+        assert records and records[-1]['state'] == 'needs_review'
+    finally:
+        for handle in handles:
+            kernel32.CloseHandle(handle)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(5)
+        parent.close()
+
+
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows Job Object containment')
 def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_path):
     import ctypes
@@ -1057,6 +1118,39 @@ def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
         os._exit(2)
     connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
     # Simulate abrupt PCRC parent death: skip all Python cleanup.
+    os._exit(0)
+
+
+def _windows_parent_death_worker(state_dir, workspace, pid_file, connection):
+    import os
+    import time
+    from jan_mcp_commander.control import ControlCommander
+
+    os.environ['JAN_MCP_STATE_DIR'] = state_dir
+    commander = ControlCommander(Path(workspace),
+                                 enabled={'files', 'commands', 'browser', 'desktop'})
+    grandchild = (
+        "import time; "
+        "open(" + repr(pid_file) + ", 'w').write(str(__import__('os').getpid())); "
+        "time.sleep(30)"
+    )
+    command = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "time.sleep(30)"
+    )
+    result = commander.start_program(sys.executable, ['-c', command], timeout_seconds=60)
+    connection.send({'child_pid': result['pid']})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not Path(pid_file).exists():
+        time.sleep(0.02)
+    if not Path(pid_file).exists():
+        connection.send({'error': 'grandchild did not start'})
+        os._exit(2)
+    connection.send({'grandchild_pid': int(Path(pid_file).read_text())})
+    # The test opens stable process handles before allowing abrupt parent exit.
+    connection.recv()
     os._exit(0)
 
 
