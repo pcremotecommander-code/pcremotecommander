@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from jan_mcp_commander.portable import PortableCommander
 from jan_mcp_commander.core import PermissionDenied
+from jan_mcp_commander.security import PrivateStore
 
 @pytest.fixture
 def cmd(tmp_path, monkeypatch):
@@ -184,3 +185,53 @@ def test_private_store_resource_lock_serializes_same_resource(cmd):
         first_future.result(timeout=3)
         second_future.result(timeout=3)
     assert second_entered.is_set()
+
+
+def _resource_lock_process_worker(state_dir, workspace, entered, release, acquired, errors):
+    try:
+        store = PrivateStore(state_dir, workspace)
+        with store.resource_locked('file:cross-process.txt'):
+            entered.set()
+            if release is not None and not release.wait(timeout=8):
+                raise TimeoutError('Timed out waiting for test release')
+            acquired.set()
+    except BaseException as exc:
+        errors.put(repr(exc))
+
+
+def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
+    import multiprocessing
+    ctx = multiprocessing.get_context('spawn')
+    workspace = tmp_path / 'workspace'
+    state_dir = tmp_path / 'private-state'
+    workspace.mkdir()
+    first_entered, second_entered = ctx.Event(), ctx.Event()
+    release_first, no_release = ctx.Event(), None
+    errors = ctx.Queue()
+    first = ctx.Process(target=_resource_lock_process_worker,
+                        args=(state_dir, workspace, first_entered, release_first,
+                              ctx.Event(), errors))
+    second = ctx.Process(target=_resource_lock_process_worker,
+                         args=(state_dir, workspace, second_entered, no_release,
+                               second_entered, errors))
+    first.start()
+    try:
+        assert first_entered.wait(timeout=5)
+        second.start()
+        assert not second_entered.wait(timeout=0.3)
+        release_first.set()
+        assert second_entered.wait(timeout=5)
+        first.join(timeout=5)
+        second.join(timeout=5)
+        assert first.exitcode == 0
+        assert second.exitcode == 0
+        assert errors.empty()
+    finally:
+        release_first.set()
+        if first.is_alive():
+            first.terminate()
+        if second.pid is not None and second.is_alive():
+            second.terminate()
+        first.join(timeout=2)
+        if second.pid is not None:
+            second.join(timeout=2)
