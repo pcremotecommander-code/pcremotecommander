@@ -122,7 +122,7 @@ def test_browser_falls_back_to_installed_chrome_when_playwright_chromium_is_miss
         on=Mock(), title=Mock(return_value='PCRC isolated Chrome'),
         url='about:blank', is_closed=lambda: False,
     )
-    context = SimpleNamespace(new_page=Mock(return_value=page), pages=[page], close=Mock())
+    context = SimpleNamespace(new_page=Mock(return_value=page), pages=[page], close=Mock(), set_default_timeout=Mock())
     browser = SimpleNamespace(new_context=Mock(return_value=context), close=Mock())
     launch = Mock(side_effect=[RuntimeError("Executable doesn't exist"), browser])
     driver = SimpleNamespace(chromium=SimpleNamespace(launch=launch), stop=Mock())
