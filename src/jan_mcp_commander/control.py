@@ -18,7 +18,7 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
-from .core import PermissionDenied
+from .core import OperationNotApplied, PermissionDenied
 from .portable import PortableCommander
 from .coordination import coordinated, coordinator, assignment
 
@@ -349,7 +349,7 @@ class ControlCommander(PortableCommander):
             if unsupported_content(data):
                 raise PermissionDenied('Binary or private key data denied')
             if hashlib.sha256(data).hexdigest() != expected_sha256:
-                raise PermissionDenied('File changed; read it again before editing')
+                raise OperationNotApplied('File changed; read it again before editing')
             before = data.decode('utf-8')
             if before.count(old_text) != 1:
                 raise PermissionDenied('old_text must match exactly once')
@@ -361,7 +361,7 @@ class ControlCommander(PortableCommander):
             # _write re-acquires the store lock; leave this scope before invoking it.
         with self._lock:
             if self._tree.read(path) != data:
-                raise PermissionDenied('File changed before apply')
+                raise OperationNotApplied('File changed before apply')
             result = self.write_text(path, after, overwrite=True)
             return {**result, 'sha256': hashlib.sha256(after.encode()).hexdigest()}
 
