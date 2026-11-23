@@ -112,6 +112,32 @@ def test_browser_url_denied_before_import(control):
     assert control._browser is None
 
 
+
+def test_browser_falls_back_to_installed_chrome_when_playwright_chromium_is_missing(control, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import sys
+
+    page = SimpleNamespace(
+        on=Mock(), title=Mock(return_value='PCRC isolated Chrome'),
+        url='about:blank', is_closed=lambda: False,
+    )
+    context = SimpleNamespace(new_page=Mock(return_value=page), pages=[page], close=Mock())
+    browser = SimpleNamespace(new_context=Mock(return_value=context), close=Mock())
+    launch = Mock(side_effect=[RuntimeError("Executable doesn't exist"), browser])
+    driver = SimpleNamespace(chromium=SimpleNamespace(launch=launch), stop=Mock())
+    monkeypatch.setitem(sys.modules, 'playwright', SimpleNamespace(sync_api=SimpleNamespace(sync_playwright=lambda: SimpleNamespace(start=lambda: driver))))
+    monkeypatch.setitem(sys.modules, 'playwright.sync_api', SimpleNamespace(sync_playwright=lambda: SimpleNamespace(start=lambda: driver)))
+
+    result = control.browser_action('tabs')
+
+    assert result['tabs'][0]['title'] == 'PCRC isolated Chrome'
+    assert launch.call_count == 2
+    assert launch.call_args_list[0].kwargs['channel'] is None
+    assert launch.call_args_list[1].kwargs['channel'] == 'chrome'
+    assert driver.stop.call_count == 0
+
+
 def test_blank_new_tab_and_explicit_url_redaction(control):
     page = SimpleNamespace(on=Mock(), goto=Mock(), is_closed=lambda:False, url='about:blank', evaluate=Mock(return_value={'title':'test','text':'synthetic','elements':[]}))
     context = SimpleNamespace(new_page=Mock(return_value=page), close=Mock(), pages=[page])
