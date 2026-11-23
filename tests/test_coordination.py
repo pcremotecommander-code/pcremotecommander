@@ -1004,13 +1004,17 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
     kernel32.WaitForSingleObject.restype = ctypes.c_uint32
     kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-    assert handle, 'could not open descendant process for exit verification'
-    try:
-        assert kernel32.WaitForSingleObject(handle, 5000) == 0, (
-            'descendant remained alive after direct command exit'
-        )
-    finally:
-        kernel32.CloseHandle(handle)
+    if not handle:
+        # A terminated process whose last handle has closed is already gone;
+        # Windows reports ERROR_INVALID_PARAMETER for its now-invalid PID.
+        assert ctypes.get_last_error() == 87, 'could not inspect descendant process'
+    else:
+        try:
+            assert kernel32.WaitForSingleObject(handle, 5000) == 0, (
+                'descendant remained alive after direct command exit'
+            )
+        finally:
+            kernel32.CloseHandle(handle)
     with store.store.locked():
         records = [record for record in store.load()['operations'].values()
                    if record.get('kind') == 'detached_command']
