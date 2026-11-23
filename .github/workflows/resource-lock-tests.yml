@@ -8,6 +8,7 @@ on:
       - "src/jan_mcp_commander/coordination.py"
       - "src/jan_mcp_commander/core.py"
       - "src/jan_mcp_commander/control.py"
+      - "src/jan_mcp_commander/development.py"
       - "tests/test_security.py"
       - "tests/test_coordination.py"
       - ".github/workflows/resource-lock-tests.yml"
