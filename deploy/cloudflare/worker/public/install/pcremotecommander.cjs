@@ -8,15 +8,16 @@ const crypto=require('node:crypto');
 const {pipeline}=require('node:stream/promises');
 const {spawn,spawnSync}=require('node:child_process');
 
-const version='0.7.0-beta.45';
-const sha256='f330639725537229132559b1d58db0f66a30393010f8a371ff0fb523ff4c63af';
-const url='https://pc-remote-commander.pcremotecommander.workers.dev/downloads/windows/pcremotecommander-0.7.0-beta.45.tgz';
+const version='0.7.0-beta.49';
+const sha256='c2c23124f80a1172419e74c47cd8deb13f6c998bb0df3e8eed5beeb88a6d6265';
+const url='https://pc-remote-commander.pcremotecommander.workers.dev/downloads/windows/pcremotecommander-0.7.0-beta.49.tgz';
 const maximumBytes=100*1024*1024;
-const posixInstallerUrl='https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta45.sh';
-const posixInstallerSha256='a51f0966926371a1b840e11853971f0b33d9d3f81eac466d1f0c2c031a002368';
+const posixInstallerUrl='https://pc-remote-commander.pcremotecommander.workers.dev/install-posix-beta49.sh';
+const posixInstallerSha256='260c23d4132134923f529c3b5423f5dda69986b893ebfd1b4ce9ae617ca035c1';
 
 function posixArgs(argv) {
   const action=argv[0]??'setup',rest=argv.slice(1);
+  if(action==='skills')return ['--cli',...argv];
   if(action==='cli')return ['--cli',...rest];
   if(rest.length)throw Error('This Linux/macOS beta accepts setup, connect, doctor, uninstall, or cli with its arguments.');
   if(['setup','connect'].includes(action))return ['setup'];
@@ -135,6 +136,7 @@ async function ensurePayload({root=cacheRoot(),fetchArchive=download,runTar=spaw
 }
 function runtimeArgs(argv) {
   const action=argv[0]??'connect';
+  if(action==='skills')return ['cli',...argv];
   if(!['setup','connect'].includes(action)||argv.includes('--gateway'))return argv;
   return [action,...argv.slice(1),'--gateway','https://pc-remote-commander.pcremotecommander.workers.dev'];
 }
@@ -148,7 +150,7 @@ function showWelcome(run=spawnSync,output=process.stdout,env=process.env) {
 async function main(argv=process.argv.slice(2)) {
   if(Number(process.versions.node.split('.')[0])<20)throw Error('Node.js 20 or newer is required.');
   if(['help','--help','-h'].includes(argv[0])) {
-    console.log('PC Remote Commander beta\n\nUsage: pcremotecommander [setup|connect|cli|doctor] [options]\nSetup downloads a pinned runtime, verifies its SHA-256, then starts pairing. Windows/Linux/macOS with Node.js 20+. Linux/macOS also need Python 3.11+ and venv.');
+    console.log('PC Remote Commander beta\n\nUsage: pcremotecommander [setup|connect|cli|doctor|skills] [options]\nSetup downloads a pinned runtime, verifies its SHA-256, then starts pairing. Windows/Linux/macOS with Node.js 20+. Linux/macOS also need Python 3.11+ and venv.');
     return;
   }
   if(process.platform!=='win32')return runPosix(argv);
