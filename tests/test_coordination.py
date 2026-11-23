@@ -969,6 +969,24 @@ def test_task_assignment_cannot_control_another_task_command_session(pc):
         pc._sessions.pop('foreign-session', None)
 
 
+def test_denied_command_capability_is_recorded_as_unapplied_not_uncertain(pc):
+    limited = ControlCommander(pc.workspace, enabled={'files'})
+    try:
+        with pytest.raises(PermissionDenied, match='capability disabled'):
+            limited.start_session('disk_usage')
+        store = coordinator(limited)
+        with store.store.locked():
+            records = [
+                record for record in store.load()['operations'].values()
+                if record.get('resources') == ['workspace']
+            ]
+        assert records[-1]['state'] == 'failed'
+        assert 'precondition rejected' in records[-1]['note']
+        assert not limited._sessions
+    finally:
+        limited.close_control()
+
+
 def test_fixed_profile_session_records_task_owner_and_requires_commands_capability(pc):
     store = coordinator(pc)
     lease = claim(store, 'profile session owner', ['workspace'])
