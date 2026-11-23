@@ -208,6 +208,28 @@ class Coordination:
             self.save(data)
             return identifier
 
+    def finish_detached_operation(self, operation_id, *, success):
+        """Finalize a detached command only after its lifetime lock is free."""
+        with self.store.locked():
+            data = self.load()
+            record = data.get('operations', {}).get(operation_id)
+            if not isinstance(record, dict) or record.get('state') != 'active':
+                return False
+            if success:
+                record.update(
+                    state='completed',
+                    note='Detached command and its inherited resource-lock holders exited.',
+                    finished_at=self.clock(),
+                )
+            else:
+                record.update(
+                    state='needs_review',
+                    note='Detached command stopped or exited unsuccessfully. Inspect actual effects before releasing reservations; never replay.',
+                    recovered_at=self.clock(),
+                )
+            self.save(data)
+            return True
+
     def expire(self, data):
         changed = False
         for task in data['tasks'].values():
