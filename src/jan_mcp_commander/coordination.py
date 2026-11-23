@@ -183,6 +183,9 @@ class Coordination:
         return {key: value for key, value in task.items() if key != 'lease_token'}
 
     def task(self, action, **args):
+        # Probe OS locks before entering the metadata transaction.
+        if action == 'reconcile':
+            self.recover_operations()
         with self.store.locked():
             data = self.load()
             self.expire(data)
@@ -208,6 +211,7 @@ class Coordination:
             if task is None:
                 raise CoordinationError('TASK_NOT_FOUND', 'Task not found. Call list_tasks and use its task ID.')
             unresolved = [run for run in data['runs'].values() if run['task_id'] == task['id'] and run['status'] in {'unknown', 'failed'}]
+            unresolved_operations = [(identifier, operation) for identifier, operation in data.get('operations', {}).items() if isinstance(operation, dict) and operation.get('task_id') == task['id'] and operation.get('state') in {'active', 'needs_review'}]
             if action == 'claim':
                 if task['status'] not in {'queued'}:
                     raise CoordinationError('TASK_CONFLICT', 'Task is assigned or requires review. Inspect list_tasks before continuing.')
@@ -245,6 +249,8 @@ class Coordination:
                         raise CoordinationError('TASK_LEASE_REQUIRED','A waiting assignment has not executed work. Cancel it with failed or queued; do not mark it completed.')
                     if unresolved:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'A browser run is uncertain or failed verification. Inspect it and reconcile_task after review before handoff.')
+                    if unresolved_operations:
+                        raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation is active or uncertain. Inspect its result and reconcile_task after review before handoff.')
                     if self.running(task['id']):
                         raise CoordinationError('TASK_PROCESS_RUNNING', 'Stop the task-owned process and inspect its output before finishing.')
                     if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
@@ -265,10 +271,16 @@ class Coordination:
                 self.save(data)
                 return self.public(task)
             if action == 'reconcile':
-                if not (task['status'] == 'needs_review' or task['status'] == 'active' and unresolved) or args.get('reviewed') is not True or self.running(task['id']):
+                live_operations = [identifier for identifier, operation in unresolved_operations if operation.get('state') == 'active']
+                if live_operations:
+                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation still holds its resource lock. Wait for it to finish or stop; no reservation will be released.')
+                if not (task['status'] == 'needs_review' or unresolved or unresolved_operations) or args.get('reviewed') is not True or self.running(task['id']):
                     raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.')
                 for run in unresolved:
                     run['status'] = 'abandoned_after_review'
+                for identifier, operation in unresolved_operations:
+                    if operation.get('state') == 'needs_review':
+                        operation.update(state='abandoned_after_review', reviewed_at=self.clock(), note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.')
                 task.update(status='queued', resources=[], lease_token='')
                 if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
                     self.commander._teaching = None
