@@ -561,6 +561,7 @@ class ControlCommander(PortableCommander):
                 if ready.get('ready') is not True or type(ready.get('pid')) is not int:
                     raise PermissionDenied('Detached command process failed to start')
 
+                coordinator(self).set_detached_child_identity(operation_id, ready['pid'])
                 supervisor.pcrc_child_pid = ready['pid']
                 supervisor.pcrc_supervisor_pid = supervisor.pid
                 supervisor.pcrc_job_handle = job_handle
