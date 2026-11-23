@@ -333,7 +333,7 @@ class Coordination:
                     if unresolved:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'A browser run is uncertain or failed verification. Inspect it and reconcile_task after review before handoff.')
                     if unresolved_operations:
-                        raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation is active or uncertain. Inspect its result and reconcile_task after review before handoff.')
+                        raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation is active or uncertain. Stop the owned process, inspect its result, then reconcile_task after review before handoff.')
                     if self.running(task['id']):
                         raise CoordinationError('TASK_PROCESS_RUNNING', 'Stop the task-owned process and inspect its output before finishing.')
                     if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
