@@ -56,6 +56,7 @@ class PrivateStore:
         self.context = hashlib.sha256(str(workspace).encode()).digest()
         self.tree = SafeTree(self.path, internal=True)
         self.mutex = threading.RLock()
+        self.resource_mutexes = {}
         try:
             self.tree.write('state.lock', b'0')
         except FileExistsError:
@@ -83,6 +84,44 @@ class PrivateStore:
                     fcntl.flock(fd, fcntl.LOCK_EX)
                 else:
                     import msvcrt
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    if os.name == 'posix':
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    else:
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            finally:
+                os.close(fd)
+
+    @contextmanager
+    def resource_locked(self, resource_id):
+        """Lock one canonical resource across threads and processes.
+
+        Callers that need multiple resources must acquire them in sorted order.
+        The metadata lock is deliberately not held while the protected work runs.
+        """
+        if not isinstance(resource_id, str) or not resource_id:
+            raise ValueError('A non-empty resource identifier is required')
+        lock_name = 'resource-' + hashlib.sha256(resource_id.encode('utf-8')).hexdigest() + '.lock'
+        with self.mutex:
+            local_lock = self.resource_mutexes.setdefault(lock_name, threading.RLock())
+        with local_lock:
+            try:
+                self.tree.write(lock_name, b'0')
+            except FileExistsError:
+                pass
+            fd = os.open(self.path / lock_name, os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0))
+            try:
+                check(os.fstat(fd))
+                if os.name == 'posix':
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                else:
+                    import msvcrt
+                    os.lseek(fd, 0, os.SEEK_SET)
                     msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
                 try:
                     yield
