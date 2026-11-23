@@ -1104,14 +1104,18 @@ def test_detached_command_exit_cannot_be_held_open_by_inherited_output_pipe(pc, 
         "f.write(str(__import__('os').getpid())); f.flush(); f.close(); "
         "time.sleep(30)"
     )
+    wait_for_pid = (
+        "deadline=time.monotonic()+10\\n"
+        "while (not os.path.exists(" + repr(str(pid_file)) +
+        ") or os.path.getsize(" + repr(str(pid_file)) + ") == 0) and time.monotonic()<deadline:\\n"
+        "    time.sleep(0.01)\\n"
+        "if not os.path.exists(" + repr(str(pid_file)) +
+        ") or os.path.getsize(" + repr(str(pid_file)) + ") == 0: raise SystemExit(9)"
+    )
     parent = (
-        "import subprocess,sys,time,os; "
+        "import subprocess,sys; "
         "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "]); "
-        "deadline=time.monotonic()+10; "
-        "while not os.path.exists(" + repr(str(pid_file)) +
-        ") or os.path.getsize(" + repr(str(pid_file)) + ") == 0: "
-        "time.sleep(0.01); "
-        "if time.monotonic()>deadline: raise SystemExit(9)"
+        "exec(" + repr(wait_for_pid) + ")"
     )
     result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=15)
     entry = pc._sessions[result['session_id']]
