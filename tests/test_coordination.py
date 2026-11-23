@@ -942,7 +942,10 @@ def test_parent_crash_keeps_reservation_until_escaped_descendants_exit(pc, tmp_p
         assert worker.exitcode == 0
 
         for pid in (child_info['child_pid'], grandchild_info['grandchild_pid']):
-            pidfd = os.pidfd_open(pid, 0)
+            try:
+                pidfd = os.pidfd_open(pid, 0)
+            except ProcessLookupError:
+                continue  # Already exited and reaped.
             try:
                 ready, _, _ = select.select([pidfd], [], [], 10)
                 assert ready, f'process {pid} survived PCRC parent death'
