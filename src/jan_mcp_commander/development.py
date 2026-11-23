@@ -422,28 +422,30 @@ class Development:
             argv=[argv[0],'-I',str(Path(__file__).with_name('_development_pip.py')),str(stage),*argv[4:]]
         environment=self.commander._environment()
         environment.update(PIP_CONFIG_FILE=os.devnull,UV_NO_CONFIG='1',TMPDIR=str(scratch),TEMP=str(scratch),TMP=str(scratch),UV_CACHE_DIR=str(scratch/'uv-cache'),UV_NO_CACHE='1')
+        # Hold the workspace operation record and OS resource lock for the
+        # entire subprocess lifetime, not merely until Popen returns.
         with coordinator(self.commander).guard(['workspace']):
             result=self.commander._start_controlled_argv(argv,budget,environment=environment)
             if assignment.get():self.commander._sessions[result['session_id']]['task_id']=assignment.get()[0]
-        entry=self.commander._sessions[result['session_id']]
-        try:
-            with self.store.locked():
-                plans=self.load();plans[identifier]['sessions'].append(result['session_id']);self.save(plans)
-            while not entry['done'].wait(.5):
-                self.commander._require_capability('commands');self.commander._require_capability('files')
-                if current:=assignment.get():
-                    store=coordinator(self.commander)
-                    with store.store.locked():store.validate(store.load()['tasks'][current[0]],current[1])
+            entry=self.commander._sessions[result['session_id']]
+            try:
+                with self.store.locked():
+                    plans=self.load();plans[identifier]['sessions'].append(result['session_id']);self.save(plans)
+                while not entry['done'].wait(.5):
+                    self.commander._require_capability('commands');self.commander._require_capability('files')
+                    if current:=assignment.get():
+                        store=coordinator(self.commander)
+                        with store.store.locked():store.validate(store.load()['tasks'][current[0]],current[1])
+                    self.check_disk_budget(identifier,scratch)
                 self.check_disk_budget(identifier,scratch)
-            self.check_disk_budget(identifier,scratch)
-            output=self.commander.process_output(result['session_id'],length=16384)
-            if output['exit_code']!=0 or output['timed_out'] or output['truncated']:
-                text=bytes(entry['output']).decode('utf-8','replace');assert_public_text(text)
-                self.update(identifier,last_process_exit_code=output['exit_code'],last_process_error=text[-2000:])
-                raise ValueError('Development subprocess failed, timed out or was cancelled')
-            return output
-        finally:
-            if not entry['done'].is_set():self.commander.stop_session(result['session_id'])
+                output=self.commander.process_output(result['session_id'],length=16384)
+                if output['exit_code']!=0 or output['timed_out'] or output['truncated']:
+                    text=bytes(entry['output']).decode('utf-8','replace');assert_public_text(text)
+                    self.update(identifier,last_process_exit_code=output['exit_code'],last_process_error=text[-2000:])
+                    raise ValueError('Development subprocess failed, timed out or was cancelled')
+                return output
+            finally:
+                if not entry['done'].is_set():self.commander.stop_session(result['session_id'])
 
     def check_disk_budget(self,identifier,scratch):
         plan=self.load()[identifier];review=plan['review']
