@@ -359,7 +359,7 @@ def test_interrupted_assignment_blocks_legacy_writes_until_review(pc):
     store = Coordination(pc, clock=lambda: now[0])
     setattr(pc, '_coordination', store)
     lease = claim(store, 'interrupted worker', ['file:abandoned.txt'])
-    now[0] += 121
+    now[0] += 601
     assert store.task('list')['tasks'][0]['status'] == 'needs_review'
     with pytest.raises(CoordinationError):
         assigned(lease, lambda: pc.write_text('abandoned.txt', 'must not execute'))
