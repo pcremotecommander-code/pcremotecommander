@@ -218,7 +218,7 @@ def supervise(config):
         child_done = threading.Event()
         input_thread = threading.Thread(
             target=_forward_input,
-            args=(sys.stdin.buffer, child.stdin, child_done), daemon=True)
+            args=(sys.stdin.buffer, child.stdin, child_done), daemon=False)
         input_thread.start()
         try:
             while True:
@@ -230,7 +230,7 @@ def supervise(config):
             return child.wait()
         finally:
             child_done.set()
-            input_thread.join(timeout=1)
+            input_thread.join()
             if child.poll() is None:
                 try:
                     if os.name == "nt":
