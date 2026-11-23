@@ -627,3 +627,67 @@ def test_reconciliation_cannot_reopen_a_finished_task_for_late_operation_record(
     with pytest.raises(CoordinationError, match='confirm reconciliation'):
         store.task('reconcile', task_id=lease['id'], reviewed=True)
     assert store.task('list')['tasks'][0]['status'] == 'completed'
+
+
+
+def test_two_recovery_workers_cannot_both_reconcile_same_operation(pc):
+    store = coordinator(pc)
+    operation = {
+        'id': 'operation-double-recovery',
+        'state': 'active',
+        'resources': ['file:double-recovery.txt'],
+        'owner': {'pid': 999999, 'thread': 1},
+        'started_at': 1000,
+    }
+    with store.store.locked():
+        data = store.load()
+        data['operations'][operation['id']] = operation
+        store.save(data)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: store.recover_operations(), range(2)))
+
+    assert sum(result['recovered'] == [operation['id']] for result in results) == 1
+    assert sum(result['busy'] == [operation['id']] for result in results) == 1
+    with store.store.locked():
+        assert store.load()['operations'][operation['id']]['state'] == 'needs_review'
+
+
+def test_operation_registration_and_task_claim_are_mutually_exclusive(pc):
+    store = coordinator(pc)
+    task = store.task('create', title='race operation against reservation')
+    barrier = __import__('threading').Barrier(2)
+    entered = __import__('threading').Event()
+    release = __import__('threading').Event()
+
+    def operation():
+        barrier.wait(timeout=5)
+        try:
+            with store.guard(['file:race-registration.txt']):
+                entered.set()
+                assert release.wait(5)
+                return 'operation'
+        except CoordinationError as exc:
+            assert exc.code == 'TASK_CONFLICT'
+            return 'blocked'
+
+    def reservation():
+        barrier.wait(timeout=5)
+        return store.task('claim', task_id=task['id'], agent='racing-claim',
+                          resources=['file:race-registration.txt'])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        operation_future = pool.submit(operation)
+        claim_future = pool.submit(reservation)
+        claimed = claim_future.result(timeout=5)
+        if claimed['status'] == 'active':
+            assert operation_future.result(timeout=5) == 'blocked'
+        else:
+            assert claimed['status'] == 'waiting'
+            assert entered.wait(5)
+            release.set()
+            assert operation_future.result(timeout=5) == 'operation'
+            promoted = store.task('renew', task_id=claimed['id'],
+                                  lease_token=claimed['lease_token'])
+            assert promoted['status'] == 'active'
+    release.set()
