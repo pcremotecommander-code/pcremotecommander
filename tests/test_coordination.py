@@ -961,9 +961,12 @@ def test_task_assignment_cannot_control_another_task_command_session(pc):
         lambda: pc.session_output('foreign-session'),
         lambda: pc.stop_session('foreign-session'),
     ]
-    for call in calls:
-        with pytest.raises(PermissionDenied, match='belongs to another task'):
-            assigned(lease, call)
+    try:
+        for call in calls:
+            with pytest.raises(PermissionDenied, match='belongs to another task'):
+                assigned(lease, call)
+    finally:
+        pc._sessions.pop('foreign-session', None)
 
 
 def test_fixed_profile_session_records_task_owner_and_requires_commands_capability(pc):
