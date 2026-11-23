@@ -53,7 +53,7 @@ class Coordination:
         self.commander = commander
         self.store = PrivateStore(commander._store.path / 'coordination', commander.workspace)
         self.clock = clock
-        self.depth = ContextVar('pcrc_coordination_depth', default=False)
+        self.depth = ContextVar('pcrc_coordination_resources', default=None)
 
     def load(self):
         try:
@@ -285,11 +285,14 @@ class Coordination:
 
     @contextmanager
     def guard(self, resources):
-        if self.depth.get():
+        targets = sorted(set(resource(item) for item in resources))
+        outer_resources = self.depth.get()
+        if outer_resources is not None:
+            if any(not any(covers(allowed, target) for allowed in outer_resources)
+                   for target in targets):
+                raise CoordinationError('TASK_SCOPE_DENIED', 'A nested operation cannot widen its outer resource reservation.')
             yield
             return
-
-        targets = sorted(set(resource(item) for item in resources))
         operation_id = uuid.uuid4().hex
         # Acquire resource locks before publishing the active record. A crash
         # before publication cannot have entered user work; after publication,
@@ -352,7 +355,7 @@ class Coordination:
                 }
                 self.save(data)
 
-            marker = self.depth.set(True)
+            marker = self.depth.set(tuple(targets))
             try:
                 yield
             except BaseException:
