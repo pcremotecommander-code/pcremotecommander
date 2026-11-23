@@ -62,3 +62,5 @@ jobs:
           python -m pytest -q -ra tests/test_security.py -k "resource_lock"
           python -m pytest -q -ra tests/test_coordination.py
           python -m pytest -q -ra tests/test_development.py
+
+# Re-run cross-platform recovery coverage for the queued-operation recovery changes.
