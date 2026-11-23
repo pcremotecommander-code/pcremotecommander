@@ -1,12 +1,14 @@
 """Private state, authenticated encrypted recovery, and bounded durable audit."""
 from contextlib import contextmanager
 import hashlib
+import errno
 import base64
 import hmac
 import json
 import os
 from pathlib import Path
 import threading
+import time
 import uuid
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .safe_fs import SafeTree, check
@@ -121,8 +123,18 @@ class PrivateStore:
                     fcntl.flock(fd, fcntl.LOCK_EX)
                 else:
                     import msvcrt
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                    # LK_LOCK gives up after a bounded retry period on Windows.
+                    # Poll LK_NBLCK instead so long-running user work is not
+                    # spuriously failed merely because it holds a lock longer.
+                    while True:
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        try:
+                            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                            break
+                        except OSError as exc:
+                            if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                                raise
+                            time.sleep(0.05)
                 try:
                     yield
                 finally:
