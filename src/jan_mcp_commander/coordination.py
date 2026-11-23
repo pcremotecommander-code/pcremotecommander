@@ -274,7 +274,8 @@ class Coordination:
                 live_operations = [identifier for identifier, operation in unresolved_operations if operation.get('state') == 'active']
                 if live_operations:
                     raise CoordinationError('TASK_REVIEW_REQUIRED', 'A coordinated operation still holds its resource lock. Wait for it to finish or stop; no reservation will be released.')
-                if not (task['status'] == 'needs_review' or unresolved or unresolved_operations) or args.get('reviewed') is not True or self.running(task['id']):
+                eligible_for_review = (task['status'] == 'needs_review' or task['status'] == 'active' and (unresolved or unresolved_operations))
+                if not eligible_for_review or args.get('reviewed') is not True or self.running(task['id']):
                     raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.')
                 for run in unresolved:
                     run['status'] = 'abandoned_after_review'
