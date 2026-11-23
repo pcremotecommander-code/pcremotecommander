@@ -42,4 +42,6 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e ".[dev]"
       - name: Run resource-lock and recovery regression tests
-        run: python -m pytest -q -ra tests/test_security.py -k "resource_lock" tests/test_coordination.py -k "operation_recovery"
+        run: |
+          python -m pytest -q -ra tests/test_security.py -k "resource_lock"
+          python -m pytest -q -ra tests/test_coordination.py -k "operation_recovery"
