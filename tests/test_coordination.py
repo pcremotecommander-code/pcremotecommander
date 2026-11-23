@@ -987,6 +987,35 @@ def test_denied_command_capability_is_recorded_as_unapplied_not_uncertain(pc):
         limited.close_control()
 
 
+
+def test_all_workspace_read_tools_require_files_capability(pc):
+    limited = ControlCommander(pc.workspace, enabled={'commands'})
+    try:
+        operations = [
+            lambda: limited.list_files('.'),
+            lambda: limited.read_text('sample.txt'),
+            lambda: limited.file_info('sample.txt'),
+            lambda: limited.find_files('sample'),
+            lambda: limited.search_text('sample'),
+        ]
+        for operation in operations:
+            with pytest.raises(PermissionDenied, match='capability disabled'):
+                operation()
+        # Status remains available so an operator can inspect the connection
+        # and enable the missing capability locally.
+        assert limited.status()['control_enabled']
+    finally:
+        limited.close_control()
+
+
+def test_workspace_content_search_cannot_escape_file_scoped_task(pc):
+    store = coordinator(pc)
+    task = claim(store, 'Narrow file task', ['file:allowed.txt'])
+    with pytest.raises(CoordinationError) as error:
+        assigned(task, lambda: pc.search_text('needle'))
+    assert error.value.code == 'TASK_SCOPE_DENIED'
+
+
 def test_fixed_profile_session_records_task_owner_and_requires_commands_capability(pc):
     store = coordinator(pc)
     lease = claim(store, 'profile session owner', ['workspace'])
