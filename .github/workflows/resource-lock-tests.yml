@@ -1,11 +1,13 @@
-name: Resource lock tests
+name: Resource and recovery tests
 
 on:
   push:
     branches: [work/full-concurrency-upgrade]
     paths:
       - "src/jan_mcp_commander/security.py"
+      - "src/jan_mcp_commander/coordination.py"
       - "tests/test_security.py"
+      - "tests/test_coordination.py"
       - ".github/workflows/resource-lock-tests.yml"
   pull_request:
     paths:
@@ -23,7 +25,7 @@ concurrency:
 
 jobs:
   resource-locks:
-    name: Resource locks (${{ matrix.os }})
+    name: Resource and recovery (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -39,5 +41,5 @@ jobs:
           python-version: "3.14"
       - name: Install test dependencies
         run: python -m pip install -e ".[dev]"
-      - name: Run resource-lock regression tests
-        run: python -m pytest -q -ra tests/test_security.py -k "resource_lock"
+      - name: Run resource-lock and recovery regression tests
+        run: python -m pytest -q -ra tests/test_security.py -k "resource_lock" tests/test_coordination.py -k "operation_recovery"
