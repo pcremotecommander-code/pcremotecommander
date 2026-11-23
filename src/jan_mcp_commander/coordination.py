@@ -184,12 +184,27 @@ class Coordination:
 
     def task(self, action, **args):
         # Probe OS locks before entering the metadata transaction.
-        if action == 'reconcile':
+        if action in {'reconcile', 'reconcile_operation'}:
             self.recover_operations()
         with self.store.locked():
             data = self.load()
             self.expire(data)
             tasks = data['tasks']
+            if action == 'reconcile_operation':
+                identifier = args.get('operation_id')
+                operation = data.get('operations', {}).get(identifier)
+                if not isinstance(operation, dict) or operation.get('state') != 'needs_review':
+                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Operation is not in a reviewable state. Live or malformed operations cannot be released.')
+                if args.get('reviewed') is not True:
+                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the operation effects and explicitly confirm reviewed=true. No action will be replayed.')
+                operation.update(
+                    state='abandoned_after_review',
+                    reviewed_at=self.clock(),
+                    note='Operator confirmed review. Operation was not replayed; inspect its effects before any new write.',
+                )
+                self.promote(data)
+                self.save(data)
+                return {'operation_id': identifier, 'state': operation['state'], 'task_id': operation.get('task_id')}
             if action == 'list':
                 held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
                 recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
