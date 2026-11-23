@@ -425,6 +425,12 @@ class Coordination:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
                     if existing.get('state') not in {'active', 'needs_review'}:
                         continue
+                    # process_input is the sole decorated method allowed to
+                    # bypass a detached command's workspace reservation. It
+                    # can only enqueue stdin for a session owned by this
+                    # commander; it cannot touch workspace files.
+                    if allow_active_sessions and existing.get('kind') == 'detached_command':
+                        continue
                     existing_resources = existing.get('resources')
                     try:
                         valid = (isinstance(existing_resources, list) and bool(existing_resources)
