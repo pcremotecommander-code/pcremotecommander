@@ -982,12 +982,15 @@ def test_windows_job_terminates_descendant_when_direct_command_exits(pc, tmp_pat
         "open(" + repr(str(pid_file)) + ", 'w').write(str(__import__('os').getpid())); "
         "time.sleep(30)"
     )
+    wait_for_grandchild = (
+        "while not os.path.exists(" + repr(str(pid_file)) +
+        ") and time.monotonic()<deadline: time.sleep(0.01)"
+    )
     parent = (
         "import subprocess,sys,time,os; "
         "subprocess.Popen([sys.executable,'-c'," + repr(grandchild) + "], "
         "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-        "deadline=time.monotonic()+5; "
-        "exec(\"while not os.path.exists(" + repr(str(pid_file)) + ") and time.monotonic()<deadline: time.sleep(0.01)\")"
+        "deadline=time.monotonic()+5; exec(" + repr(wait_for_grandchild) + ")"
     )
     result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=10)
     entry = pc._sessions[result['session_id']]
