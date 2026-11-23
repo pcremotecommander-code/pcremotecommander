@@ -154,9 +154,18 @@ class Coordination:
         tasks=data['tasks'].values()
         held=[t for t in tasks if t['status'] in {'active','needs_review'}]
         for operation in data.get('operations', {}).values():
+            if not isinstance(operation, dict):
+                held.append({'resources': ['workspace']})
+                continue
             if operation.get('state') in {'active', 'needs_review'}:
                 resources = operation.get('resources')
-                held.append({'resources': resources if isinstance(resources, list) and resources else ['workspace']})
+                try:
+                    valid = (isinstance(resources, list) and bool(resources)
+                             and all(isinstance(item, str) and item and resource(item) == item
+                                     for item in resources))
+                except (TypeError, ValueError):
+                    valid = False
+                held.append({'resources': resources if valid else ['workspace']})
         blocked=[]
         changed=False
         for task in sorted((t for t in tasks if t['status']=='waiting'),key=lambda t:t['queue_order']):
@@ -307,11 +316,18 @@ class Coordination:
                     if any(overlaps(a, b) for a in task['resources'] for b in targets):
                         raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
                 for existing_id, existing in data.get('operations', {}).items():
+                    if not isinstance(existing, dict):
+                        raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
                     if existing.get('state') not in {'active', 'needs_review'}:
                         continue
                     existing_resources = existing.get('resources')
-                    if (not isinstance(existing_resources, list) or not existing_resources
-                            or any(not isinstance(item, str) for item in existing_resources)):
+                    try:
+                        valid = (isinstance(existing_resources, list) and bool(existing_resources)
+                                 and all(isinstance(item, str) and item and resource(item) == item
+                                         for item in existing_resources))
+                    except (TypeError, ValueError):
+                        valid = False
+                    if not valid:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
                     if any(overlaps(a, b) for a in existing_resources for b in targets):
                         raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying.')
