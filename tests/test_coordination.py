@@ -344,3 +344,85 @@ def test_interrupted_assignment_blocks_legacy_writes_until_review(pc):
     fresh = store.task('claim', task_id=lease['id'], agent='replacement', resources=['file:abandoned.txt'])
     assigned(fresh, lambda: pc.write_text('abandoned.txt', 'reviewed replacement'))
     assert (pc.workspace / 'abandoned.txt').read_text() == 'reviewed replacement'
+
+
+
+def test_operation_recovery_marks_abandoned_record_for_review_without_replay(pc):
+    store = coordinator(pc)
+    operation = {
+        'id': 'operation-dead',
+        'state': 'active',
+        'resources': ['file:recovery.txt'],
+        'owner': 'dead-process',
+        'started_at': 1000,
+    }
+    with store.store.locked():
+        data = store.load()
+        data['operations']['operation-dead'] = operation
+        store.save(data)
+
+    result = store.recover_operations()
+    assert result == {'recovered': ['operation-dead'], 'busy': [], 'changed': []}
+    with store.store.locked():
+        recovered = store.load()['operations']['operation-dead']
+    assert recovered['state'] == 'needs_review'
+    assert recovered['owner'] == 'dead-process'
+    assert recovered['recovered_at'] > 0
+    assert 'never replay' in recovered['note']
+
+
+def test_operation_recovery_keeps_live_resource_operation_active(pc):
+    store = coordinator(pc)
+    operation = {
+        'id': 'operation-live',
+        'state': 'active',
+        'resources': ['file:live.txt', 'file:live-child.txt'],
+        'owner': 'live-process',
+        'started_at': 1000,
+    }
+    with store.store.locked():
+        data = store.load()
+        data['operations']['operation-live'] = operation
+        store.save(data)
+
+    with store.store.resource_locked('file:live-child.txt'):
+        result = store.recover_operations()
+    assert result == {'recovered': [], 'busy': ['operation-live'], 'changed': []}
+    with store.store.locked():
+        assert store.load()['operations']['operation-live']['state'] == 'active'
+
+
+def test_operation_recovery_does_not_overwrite_a_changed_record(pc, monkeypatch):
+    store = coordinator(pc)
+    operation = {
+        'id': 'operation-raced',
+        'state': 'active',
+        'resources': ['file:raced.txt'],
+        'owner': 'owner-a',
+        'started_at': 1000,
+    }
+    with store.store.locked():
+        data = store.load()
+        data['operations']['operation-raced'] = operation
+        store.save(data)
+
+    original = store.store.try_resource_locked
+
+    @contextmanager
+    def change_during_probe(resource_id):
+        with original(resource_id) as acquired:
+            if acquired:
+                with store.store.locked():
+                    latest = store.load()
+                    latest['operations']['operation-raced']['owner'] = 'owner-b'
+                    store.save(latest)
+            yield acquired
+
+    from contextlib import contextmanager
+    monkeypatch.setattr(store.store, 'try_resource_locked', change_during_probe)
+    result = store.recover_operations()
+    assert result == {'recovered': [], 'busy': [], 'changed': ['operation-raced']}
+    with store.store.locked():
+        current = store.load()['operations']['operation-raced']
+    assert current['state'] == 'active'
+    assert current['owner'] == 'owner-b'
