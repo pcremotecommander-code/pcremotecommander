@@ -37,6 +37,11 @@ class PermissionDenied(ValueError):
     pass
 
 
+class OperationNotApplied(PermissionDenied):
+    """A precondition rejected a write before any mutation was attempted."""
+
+
+
 def state_directory(workspace: Path, audit_path: Path | None = None) -> Path:
     default = Path.home() / '.local/state/jan-mcp-commander' / hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
     return Path(audit_path).parent if audit_path else Path(os.environ.get('JAN_MCP_STATE_DIR', str(default)))
