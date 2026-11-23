@@ -57,13 +57,13 @@ def test_task_lease_survives_longer_interaction_and_slides_on_assigned_work(pc):
     assert lease['expires_at'] == 1000 + 600
 
     # A real acceptance test can take longer than the former 120-second TTL.
-    now[0] += 601
+    now[0] += 599
     renewed = store.task('renew', task_id=lease['id'], lease_token=lease['lease_token'])
     assert renewed['status'] == 'active'
     assert renewed['expires_at'] == now[0] + 600
 
     # Every successful assigned operation extends the idle window.
-    now[0] += 601
+    now[0] += 599
     marker = assignment.set((lease['id'], lease['lease_token']))
     try:
         with store.guard(['ui']):
@@ -231,7 +231,7 @@ def test_expiry_persists_uncertainty_and_reconciliation_fences_old_token(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     old = claim(store, 'old', ['file:nested'])
-    now[0] += 121
+    now[0] += 601
     assert store.task('list')['tasks'][0]['status'] == 'needs_review'
     other=claim(store, 'other', ['file:nested/a.txt'])
     assert other['status']=='waiting'
