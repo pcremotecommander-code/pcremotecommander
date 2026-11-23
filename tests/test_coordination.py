@@ -811,3 +811,63 @@ def test_live_owned_command_blocks_workspace_but_allows_its_stdin(pc):
             pass
     finally:
         pc._sessions.pop('live-command', None)
+
+
+def test_detached_command_reservation_survives_request_process_scope(pc):
+    import time
+    store = coordinator(pc)
+    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(2)'],
+                              timeout_seconds=10)
+    entry = pc._sessions[result['session_id']]
+    assert result['pid'] == entry['child_pid']
+    assert result['supervisor_pid'] == entry['supervisor_pid']
+
+    other = ControlCommander(pc.workspace, enabled={'files', 'commands', 'browser', 'desktop'})
+    try:
+        with other._store.locked():
+            records = [record for record in coordinator(other).load()['operations'].values()
+                       if record.get('kind') == 'detached_command'
+                       and record.get('state') == 'active']
+        assert len(records) == 1
+        assert records[0]['resources'] == ['workspace']
+        assert records[0]['lock_resources'] == [entry['process'].pcrc_lock_resource]
+        with pytest.raises(CoordinationError, match='another or uncertain operation'):
+            with coordinator(other).guard(['file:while-child-runs.txt']):
+                pytest.fail('another commander entered while detached child was running')
+
+        assert entry['done'].wait(10)
+        with other._store.locked():
+            completed = coordinator(other).load()['operations'][records[0]['id']]
+        assert completed['state'] == 'completed'
+        with coordinator(other).guard(['file:after-child-exits.txt']):
+            pass
+    finally:
+        other.close_control()
+
+
+def test_supervisor_crash_releases_child_lock_only_into_review(pc):
+    import os
+    import time
+    store = coordinator(pc)
+    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(30)'],
+                              timeout_seconds=40)
+    entry = pc._sessions[result['session_id']]
+    with store.store.locked():
+        data = store.load()
+        record_id = next(key for key, value in data['operations'].items()
+                         if value.get('kind') == 'detached_command'
+                         and value.get('state') == 'active')
+    entry['process'].kill()
+    entry['process'].wait(timeout=10)
+    if os.name == 'nt' and entry.get('job_handle'):
+        from jan_mcp_commander.session_guard import close_supervisor_job
+        close_supervisor_job(entry['job_handle'])
+        entry['job_handle'] = None
+    assert entry['done'].wait(10)
+
+    recovered = store.recover_operations()
+    assert record_id in recovered['recovered']
+    with store.store.locked():
+        record = store.load()['operations'][record_id]
+    assert record['state'] == 'needs_review'
+    assert 'never replay' in record['note'].lower()
