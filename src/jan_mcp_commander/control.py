@@ -316,12 +316,6 @@ class ControlCommander(PortableCommander):
         self._check('files')
         return super().find_files(term, max_results, path)
 
-    @coordinated('workspace')
-    def search_text(self, term, max_results=50):
-        """Search file contents across the workspace under a workspace reservation."""
-        self._check('files')
-        return super().search_text(term, max_results)
-
     @coordinated('files', 'path')
     def create_directory(self, path):
         self._check('files')
@@ -424,7 +418,9 @@ class ControlCommander(PortableCommander):
             result = self.write_text(path, after, overwrite=True)
             return {**result, 'sha256': hashlib.sha256(after.encode()).hexdigest()}
 
+    @coordinated('workspace')
     def search_text(self, term, max_results=50):
+        self._check('files')
         from .safe_fs import unsupported_content
         self._rate()
         if not isinstance(term, str) or not term or len(term) > 200 or type(max_results) is not int or not 1 <= max_results <= 100:
