@@ -268,6 +268,10 @@ class ControlCommander(PortableCommander):
         from .skills import Feedback
         return Feedback(self._store).record(category, selected_skill, routing_method, outcome, correction, reviewed=False)
 
+    def diagnostic(self, name):
+        self._check('commands')
+        return super().diagnostic(name)
+
     def status(self):
         result = super().status()
         if self._foreground_parent is not None and not self._renew_foreground():self.close_control()
