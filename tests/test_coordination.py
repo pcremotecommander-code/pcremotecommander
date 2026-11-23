@@ -1030,6 +1030,20 @@ def test_session_reads_require_live_commands_capability_but_stop_remains_availab
     assert pc.stop_session(session['session_id'])['stopped'] == session['session_id']
 
 
+@pytest.mark.parametrize("operation", [
+    lambda pc: pc.inspect_office("outside.xlsx"),
+    lambda pc: pc.inspect_media("outside.png", "image"),
+    lambda pc: pc.transcribe_audio("outside.wav"),
+    lambda pc: pc.read_pdf("outside.pdf"),
+])
+def test_path_based_read_tools_cannot_escape_file_scoped_task(pc, operation):
+    store = coordinator(pc)
+    task = claim(store, 'Narrow file task', ['file:allowed.txt'])
+    with pytest.raises(CoordinationError) as error:
+        assigned(task, lambda: operation(pc))
+    assert error.value.code == 'TASK_SCOPE_DENIED'
+
+
 def test_workspace_content_search_cannot_escape_file_scoped_task(pc):
     store = coordinator(pc)
     task = claim(store, 'Narrow file task', ['file:allowed.txt'])
