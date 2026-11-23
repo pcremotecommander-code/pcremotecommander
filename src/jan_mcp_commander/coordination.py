@@ -234,7 +234,8 @@ class Coordination:
             if task is None:
                 raise CoordinationError('TASK_NOT_FOUND', 'Task not found. Call list_tasks and use its task ID.')
             unresolved = [
-                run for run in data['runs'].values()
+                (identifier, dict(run))
+                for identifier, run in data['runs'].items()
                 if run['task_id'] == task_id and run['status'] in {'unknown', 'failed'}
             ]
             operations = [
@@ -274,7 +275,8 @@ class Coordination:
                         'Task assignment changed during reconciliation. Inspect it again; no reservation was released.',
                     )
                 unresolved_now = [
-                    run for run in data['runs'].values()
+                    (identifier, run)
+                    for identifier, run in data['runs'].items()
                     if run['task_id'] == task_id and run['status'] in {'unknown', 'failed'}
                 ]
                 operations_now = [
@@ -287,6 +289,7 @@ class Coordination:
                     any(operation.get('state') == 'active' for _, operation in operations_now)
                     or [(identifier, operation) for identifier, operation in operations_now]
                     != operations
+                    or unresolved_now != unresolved
                     or not (
                         task['status'] == 'needs_review'
                         or task['status'] == 'active' and (unresolved_now or operations_now)
@@ -297,7 +300,7 @@ class Coordination:
                         'TASK_REVIEW_REQUIRED',
                         'Task or operation state changed during reconciliation. Inspect it again; no reservation was released.',
                     )
-                for run in unresolved_now:
+                for _, run in unresolved_now:
                     run['status'] = 'abandoned_after_review'
                 for _, operation in operations_now:
                     operation.update(
