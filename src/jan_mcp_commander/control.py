@@ -86,6 +86,7 @@ class ControlCommander(PortableCommander):
             # all actual workspace mutations occur later inside guarded steps.
             raise OperationNotApplied(str(exc)) from exc
 
+    @coordinated('workspace')
     def get_development_change(self, plan_id):
         self._check('commands');self._require_capability('files')
         return self._development().get(plan_id)
@@ -97,17 +98,20 @@ class ControlCommander(PortableCommander):
                 self._document_workflow = DocumentWorkflow(self)
             return self._document_workflow
 
+    @coordinated('workspace')
     def preview_document_workflow(self, jobs):
         self._check('files')
         self._audit('document_preview', True, 'bounded document review')
         return self._documents().preview(jobs)
 
+    @coordinated('workspace')
     def apply_document_workflow(self, plan_id, review_sha256, review):
         self._check('files')
         self._require_binary_write()
         self._audit('document_apply', True, plan_id)
         return self._documents().apply(plan_id, review_sha256, review)
 
+    @coordinated('workspace')
     def get_document_workflow(self, plan_id):
         self._check('files')
         return self._documents().get(plan_id)
@@ -129,6 +133,7 @@ class ControlCommander(PortableCommander):
         self._require_capability('files')
         super()._require_binary_write()
 
+    @coordinated('files','path')
     def inspect_office(self,path,sheet='',start_row=1,max_rows=50):
         from .office_documents import process_office
         self._check('files')
@@ -152,12 +157,14 @@ class ControlCommander(PortableCommander):
         write=self._write_binary(path,result.pop('bytes'),overwrite=True,expected_sha256=expected_sha256)
         return {**result,**write,'source_sha256':expected_sha256}
 
+    @coordinated('files','path')
     def inspect_media(self,path,kind,start=0,seconds=10):
         self._check('files')
         from .media_tools import process_media
         self._audit('inspect_media',True,path)
         return process_media(self._tree,self._store.path/'media',path,'inspect',kind,start=start,seconds=seconds)
 
+    @coordinated('files','path')
     def transcribe_audio(self,path,start=0,seconds=10):
         self._check('files')
         from .media_tools import process_media
@@ -198,6 +205,7 @@ class ControlCommander(PortableCommander):
         data, pages = create_text_pdf(text)
         return {**self._write_binary(destination, data), 'page_count': pages}
 
+    @coordinated('files','path')
     def read_pdf(self, path):
         self._check('files')
         return super().read_pdf(path)
