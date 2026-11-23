@@ -281,6 +281,36 @@ class ControlCommander(PortableCommander):
         return result
 
     @coordinated('files', 'path')
+    def list_files(self, path='.'):
+        """List workspace entries only when the files capability is enabled."""
+        self._check('files')
+        return super().list_files(path)
+
+    @coordinated('files', 'path')
+    def read_text(self, path):
+        """Read workspace text only when the files capability is enabled."""
+        self._check('files')
+        return super().read_text(path)
+
+    @coordinated('files', 'path')
+    def file_info(self, path):
+        """Inspect workspace file metadata only with the files capability."""
+        self._check('files')
+        return super().file_info(path)
+
+    @coordinated('files', 'path')
+    def find_files(self, term, max_results=50, path='.'):
+        """Search filenames within the reserved path and enabled file capability."""
+        self._check('files')
+        return super().find_files(term, max_results, path)
+
+    @coordinated('workspace')
+    def search_text(self, term, max_results=50):
+        """Search file contents across the workspace under a workspace reservation."""
+        self._check('files')
+        return super().search_text(term, max_results)
+
+    @coordinated('files', 'path')
     def create_directory(self, path):
         self._check('files')
         self._audit('create_directory', True, path)
