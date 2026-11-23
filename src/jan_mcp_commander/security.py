@@ -146,6 +146,64 @@ class PrivateStore:
             finally:
                 os.close(fd)
 
+
+    @contextmanager
+    def try_resource_locked(self, resource_id):
+        """Attempt a resource lock without waiting; yield whether it was acquired.
+
+        This is intended for recovery probes. A successful probe is held until
+        the context exits, so callers can make a decision without a check/use
+        race. It never removes lock files: OS locks, not file existence, signal
+        whether an operation is live.
+        """
+        if not isinstance(resource_id, str) or not resource_id:
+            raise ValueError('A non-empty resource identifier is required')
+        lock_name = 'resource-' + hashlib.sha256(resource_id.encode('utf-8')).hexdigest() + '.lock'
+        with self.mutex:
+            local_lock = self.resource_mutexes.setdefault(lock_name, threading.RLock())
+        if not local_lock.acquire(blocking=False):
+            yield False
+            return
+        fd = None
+        acquired = False
+        try:
+            try:
+                self.tree.write(lock_name, b'0')
+            except FileExistsError:
+                pass
+            fd = os.open(self.path / lock_name, os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0))
+            check(os.fstat(fd))
+            if os.name == 'posix':
+                import fcntl
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                except BlockingIOError:
+                    acquired = False
+            else:
+                import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                except OSError as exc:
+                    if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                        raise
+                    acquired = False
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    if os.name == 'posix':
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    else:
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        finally:
+            if fd is not None:
+                os.close(fd)
+            local_lock.release()
+
     def backup(self, path, data, *, binary=False):
         if binary and len(data) > 8 * 1024 * 1024:
             raise ValueError('Binary backup size limit exceeded')
