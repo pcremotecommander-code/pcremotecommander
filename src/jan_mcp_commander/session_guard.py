@@ -16,12 +16,180 @@ _CHILD_PGID = None
 _CHILD_PID = None
 _PARENT_DEAD = threading.Event()
 _PARENT_HANDLE = None
+_JOB_HANDLE = None
 _SUPERVISOR_DONE = threading.Event()
 _PARENT_WATCHER = None
 
 
 def _kernel32():
     return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def create_windows_job_handle():
+    """Create an inheritable kill-on-close Job Object for one detached command."""
+    if os.name != "nt":
+        return None
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    handle = kernel32.CreateJobObjectW(None, None)
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in
+                    ("ReadOperationCount", "WriteOperationCount",
+                     "OtherOperationCount", "ReadTransferCount",
+                     "WriteTransferCount", "OtherTransferCount")]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimitInformation),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    info = ExtendedLimitInformation()
+    info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    if not kernel32.SetInformationJobObject(
+            handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(handle)
+        raise OSError(error, "SetInformationJobObject failed")
+    kernel32.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
+    kernel32.SetHandleInformation.restype = wintypes.BOOL
+    if not kernel32.SetHandleInformation(handle, 1, 1):  # HANDLE_FLAG_INHERIT
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(handle)
+        raise OSError(error, "Could not make Job Object handle inheritable")
+    return handle if isinstance(handle, int) else handle.value
+
+
+def close_windows_job_handle(handle):
+    if handle and os.name == "nt":
+        from ctypes import wintypes
+        kernel32 = _kernel32()
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle(wintypes.HANDLE(handle))
+
+
+def terminate_windows_job(handle):
+    if not handle or os.name != "nt":
+        return False
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    return bool(kernel32.TerminateJobObject(wintypes.HANDLE(handle), 125))
+
+
+def windows_job_active_processes(handle):
+    if not handle or os.name != "nt":
+        return 0
+    from ctypes import wintypes
+
+    class BasicAccountingInformation(ctypes.Structure):
+        _fields_ = [
+            ("TotalUserTime", ctypes.c_longlong),
+            ("TotalKernelTime", ctypes.c_longlong),
+            ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+            ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+            ("TotalPageFaults", wintypes.DWORD),
+            ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("TotalTerminatedProcesses", wintypes.DWORD),
+        ]
+
+    kernel32 = _kernel32()
+    kernel32.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD)]
+    kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    info = BasicAccountingInformation()
+    if not kernel32.QueryInformationJobObject(
+            wintypes.HANDLE(handle), 1, ctypes.byref(info), ctypes.sizeof(info), None):
+        raise OSError(ctypes.get_last_error(), "QueryInformationJobObject failed")
+    return info.ActiveProcesses
+
+
+def _assign_and_resume_windows_child(child, job_handle):
+    """Assign a suspended child to its non-breakaway job before it can execute."""
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    process_handle = child._handle
+    if not kernel32.AssignProcessToJobObject(wintypes.HANDLE(job_handle), process_handle):
+        error = ctypes.get_last_error()
+        child.kill()
+        child.wait()
+        raise OSError(error, "AssignProcessToJobObject failed")
+
+    class ThreadEntry32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+            ("th32ThreadID", wintypes.DWORD), ("th32OwnerProcessID", wintypes.DWORD),
+            ("tpBasePri", wintypes.LONG), ("tpDeltaPri", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry32)]
+    kernel32.Thread32First.restype = wintypes.BOOL
+    kernel32.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry32)]
+    kernel32.Thread32Next.restype = wintypes.BOOL
+    kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+    kernel32.ResumeThread.restype = wintypes.DWORD
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000004, 0)
+    if snapshot == wintypes.HANDLE(-1).value:
+        raise OSError(ctypes.get_last_error(), "CreateToolhelp32Snapshot failed")
+    thread_handle = None
+    try:
+        entry = ThreadEntry32()
+        entry.dwSize = ctypes.sizeof(entry)
+        found = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+        while found:
+            if entry.th32OwnerProcessID == child.pid:
+                thread_handle = kernel32.OpenThread(0x0002, False, entry.th32ThreadID)
+                if thread_handle:
+                    break
+            found = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    if not thread_handle:
+        terminate_windows_job(job_handle)
+        raise OSError(ctypes.get_last_error(), "Could not open suspended child thread")
+    try:
+        if kernel32.ResumeThread(thread_handle) == 0xFFFFFFFF:
+            error = ctypes.get_last_error()
+            terminate_windows_job(job_handle)
+            raise OSError(error, "ResumeThread failed")
+    finally:
+        kernel32.CloseHandle(thread_handle)
 
 
 def open_child_process_handle(pid):
@@ -72,6 +240,9 @@ def terminate_child_process_tree(pid, handle):
 
 
 def _kill_windows_tree(pid):
+    if _JOB_HANDLE:
+        terminate_windows_job(_JOB_HANDLE)
+        return
     if pid is None:
         return
     handle = open_child_process_handle(pid)
@@ -199,8 +370,16 @@ def _install_parent_death_guard():
             os.kill(os.getpid(), signal.SIGTERM)
     else:
         from ctypes import wintypes
-        global _PARENT_HANDLE
+        global _PARENT_HANDLE, _JOB_HANDLE
+        job_text = os.environ.pop("PCRC_SUPERVISOR_JOB_HANDLE", "")
+        if not job_text.isdigit():
+            raise RuntimeError("missing Windows command Job Object handle")
+        _JOB_HANDLE = int(job_text)
         kernel32 = _kernel32()
+        kernel32.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
+        kernel32.SetHandleInformation.restype = wintypes.BOOL
+        if not kernel32.SetHandleInformation(wintypes.HANDLE(_JOB_HANDLE), 1, 0):
+            raise OSError(ctypes.get_last_error(), "Could not secure Job Object handle")
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.OpenProcess.restype = wintypes.HANDLE
         opened = kernel32.OpenProcess(0x00100000, False, expected_pid)
@@ -266,7 +445,7 @@ def supervise(config):
         if _PARENT_DEAD.is_set():
             return 125
 
-        options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004}
                    if os.name == "nt" else {"start_new_session": True})
         inherited_lock = {}
         if os.name == "posix":
@@ -277,6 +456,12 @@ def supervise(config):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, shell=False, **inherited_lock, **options,
         )
+        if os.name == "nt":
+            if not _JOB_HANDLE:
+                child.kill()
+                child.wait()
+                raise RuntimeError("Windows Job Object is unavailable")
+            _assign_and_resume_windows_child(child, _JOB_HANDLE)
         _CHILD_PID = child.pid
         _CHILD_PGID = child.pid if os.name == "posix" else None
         if _PARENT_DEAD.is_set():
@@ -305,6 +490,14 @@ def supervise(config):
                 # They were terminated, so require review rather than treating
                 # the operation as a clean completion.
                 return 125
+            if os.name == "nt":
+                try:
+                    if windows_job_active_processes(_JOB_HANDLE):
+                        terminate_windows_job(_JOB_HANDLE)
+                        return 125
+                except OSError:
+                    terminate_windows_job(_JOB_HANDLE)
+                    return 125
             return exit_code
         finally:
             child_done.set()
