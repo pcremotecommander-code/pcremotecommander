@@ -153,9 +153,10 @@ class Coordination:
             return False
         tasks=data['tasks'].values()
         held=[t for t in tasks if t['status'] in {'active','needs_review'}]
+        operation_reservations = []
         for operation in data.get('operations', {}).values():
             if not isinstance(operation, dict):
-                held.append({'resources': ['workspace']})
+                operation_reservations.append({'resources': ['workspace']})
                 continue
             if operation.get('state') in {'active', 'needs_review'}:
                 resources = operation.get('resources')
@@ -165,11 +166,11 @@ class Coordination:
                                      for item in resources))
                 except (TypeError, ValueError):
                     valid = False
-                held.append({'resources': resources if valid else ['workspace']})
+                operation_reservations.append({'resources': resources if valid else ['workspace']})
         blocked=[]
         changed=False
         for task in sorted((t for t in tasks if t['status']=='waiting'),key=lambda t:t['queue_order']):
-            if len(held)>=MAX_ACTIVE_ASSIGNMENTS or any(overlaps(a,b) for other in held+blocked for a in other['resources'] for b in task['resources']):
+            if len(held)>=MAX_ACTIVE_ASSIGNMENTS or any(overlaps(a,b) for other in held+operation_reservations+blocked for a in other['resources'] for b in task['resources']):
                 blocked.append(task)
                 continue
             task.update(status='active',expires_at=self.clock()+120)
