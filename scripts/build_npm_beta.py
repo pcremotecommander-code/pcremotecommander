@@ -150,7 +150,7 @@ def build(base: Path, destination: Path, version: str = VERSION) -> dict:
         "dependencies": {"ws": "8.22.0", **json.loads((task_source / "package.json").read_text(encoding="utf-8"))["dependencies"]},
         "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod"],
         "publishConfig": {"access": "public", "tag": "beta"},
-        "files": ["bin", "project", "runtime", "SOURCE-MANIFEST.json"],
+        "files": ["bin", "project", "runtime", "SOURCE-MANIFEST.json", "README.md", "LICENSE.txt"],
     }
     (destination / "package.json").write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
     shutil.copy2(ROOT / "deploy/npm/launcher/LICENSE.txt", destination / "LICENSE.txt")
