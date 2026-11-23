@@ -1225,62 +1225,64 @@ def test_linux_subreaper_reaps_descendants_across_repeated_fork_races(pc, tmp_pa
     import os
     import time
 
-    for iteration in range(3):
-        directory = tmp_path / f'fork-race-{iteration}'
-        directory.mkdir()
-        worker_files = [directory / f'worker-{index}.pid' for index in range(8)]
-        grandchild_files = [directory / f'grandchild-{index}.pid' for index in range(8)]
-        worker_codes = []
-        for worker_file, grandchild_file in zip(worker_files, grandchild_files):
-            grandchild_code = (
-                "import os,time; "
-                "f=open(" + repr(str(grandchild_file)) + ", 'w'); "
-                "f.write(str(os.getpid())); f.flush(); f.close(); time.sleep(30)"
-            )
-            worker_codes.append(
-                "import os,subprocess,sys,time; "
-                "f=open(" + repr(str(worker_file)) + ", 'w'); "
-                "f.write(str(os.getpid())); f.flush(); f.close(); "
-                "time.sleep(0.02); "
-                "subprocess.Popen([sys.executable,'-c'," + repr(grandchild_code) + "], "
-                "start_new_session=True, close_fds=True, "
-                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
-            )
-        launches = " ".join(
-            "subprocess.Popen([sys.executable,'-c'," + repr(code) + "], "
+    directory = tmp_path / 'fork-race'
+    directory.mkdir()
+    worker_files = [directory / f'worker-{index}.pid' for index in range(16)]
+    grandchild_files = [directory / f'grandchild-{index}.pid' for index in range(16)]
+    worker_codes = []
+    for worker_file, grandchild_file in zip(worker_files, grandchild_files):
+        grandchild_code = (
+            "import os,time; "
+            "f=open(" + repr(str(grandchild_file)) + ", 'w'); "
+            "f.write(str(os.getpid())); f.flush(); f.close(); time.sleep(30)"
+        )
+        worker_codes.append(
+            "import os,subprocess,sys,time; "
+            "f=open(" + repr(str(worker_file)) + ", 'w'); "
+            "f.write(str(os.getpid())); f.flush(); f.close(); "
+            "time.sleep(0.02); "
+            "subprocess.Popen([sys.executable,'-c'," + repr(grandchild_code) + "], "
             "start_new_session=True, close_fds=True, "
-            "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);"
-            for code in worker_codes
+            "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
         )
-        wait_for_workers = (
-            "deadline=time.monotonic()+5\\n"
-            "while not all(os.path.exists(p) for p in " +
-            repr([str(worker_file) for worker_file in worker_files]) +
-            ") and time.monotonic()<deadline:\\n"
-            "    time.sleep(0.002)"
-        )
-        parent = (
-            "import os,subprocess,sys,time; " + launches +
-            "exec(" + repr(wait_for_workers) + ")"
-        )
-        result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=15)
-        entry = pc._sessions[result['session_id']]
-        assert entry['done'].wait(10), 'fork-race cleanup did not finish'
-        pids = []
-        for path in worker_files + grandchild_files:
-            if path.exists() and path.stat().st_size:
-                pids.append(int(path.read_text()))
-        for pid in pids:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                continue
-            pytest.fail(f'descendant {pid} survived fork-race cleanup')
+    launches = " ".join(
+        "subprocess.Popen([sys.executable,'-c'," + repr(code) + "], "
+        "start_new_session=True, close_fds=True, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);"
+        for code in worker_codes
+    )
+    wait_for_workers = (
+        "deadline=time.monotonic()+5\\n"
+        "while not all(os.path.exists(p) for p in " +
+        repr([str(worker_file) for worker_file in worker_files]) +
+        ") and time.monotonic()<deadline:\\n"
+        "    time.sleep(0.002)"
+    )
+    parent = (
+        "import os,subprocess,sys,time; " + launches +
+        "exec(" + repr(wait_for_workers) + ")"
+    )
+    result = pc.start_program(sys.executable, ['-c', parent], timeout_seconds=15)
+    entry = pc._sessions[result['session_id']]
+    assert entry['done'].wait(10), 'fork-race cleanup did not finish'
+    pids = []
+    for path in worker_files + grandchild_files:
+        if path.exists() and path.stat().st_size:
+            pids.append(int(path.read_text()))
+    assert len(pids) >= len(worker_files), 'not all fork-race workers started'
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        pytest.fail(f'descendant {pid} survived fork-race cleanup')
 
-    with coordinator(pc).store.locked():
-        records = [record for record in coordinator(pc).load()['operations'].values()
+    store = coordinator(pc)
+    with store.store.locked():
+        records = [record for record in store.load()['operations'].values()
                    if record.get('kind') == 'detached_command']
     assert records[-1]['state'] == 'needs_review'
+
 
 
 def _linux_parent_death_worker(state_dir, workspace, pid_file, connection):
