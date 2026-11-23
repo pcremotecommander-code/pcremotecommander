@@ -484,7 +484,7 @@ class ControlCommander(PortableCommander):
         lifetime = max(1, min(timeout_seconds, int(self.expires-time.monotonic())))
 
         def launch():
-            from .session_guard import assign_supervisor_job, close_supervisor_job
+            from .session_guard import (open_child_process_handle, terminate_child_process_tree, close_child_process_handle)
             store = coordinator(self).store
             lock_resource = 'session:' + uuid.uuid4().hex
             owner_lock_resource = 'session-owner:' + uuid.uuid4().hex
@@ -507,22 +507,17 @@ class ControlCommander(PortableCommander):
                 raise PermissionDenied('Could not establish the parent-owned session reservation')
 
             supervisor = None
-            job_handle = None
+            child_handle = None
             try:
                 options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
                            if os.name == 'nt' else {'start_new_session': True})
                 supervisor_environment = dict(child_environment)
-                if os.name == 'posix':
-                    supervisor_environment['PCRC_SUPERVISOR_PARENT_PID'] = str(os.getpid())
+                supervisor_environment['PCRC_SUPERVISOR_PARENT_PID'] = str(os.getpid())
                 supervisor = subprocess.Popen(
                     [sys.executable, '-m', 'jan_mcp_commander.session_guard'],
                     cwd=self.workspace, env=supervisor_environment,
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, shell=False, **options)
-                if os.name == 'nt':
-                    # The parent owns the only Job handle. Closing it on exit
-                    # kills the supervisor and every child in its process tree.
-                    job_handle = assign_supervisor_job(supervisor)
                 config = {
                     'workspace': str(self.workspace),
                     'state_dir': str(store.path),
@@ -562,19 +557,23 @@ class ControlCommander(PortableCommander):
                     raise PermissionDenied('Detached command process failed to start')
 
                 coordinator(self).set_detached_child_identity(operation_id, ready['pid'])
+                if os.name == 'nt':
+                    child_handle = open_child_process_handle(ready['pid'])
                 supervisor.pcrc_child_pid = ready['pid']
                 supervisor.pcrc_supervisor_pid = supervisor.pid
-                supervisor.pcrc_job_handle = job_handle
+                supervisor.pcrc_child_handle = child_handle
                 supervisor.pcrc_lock_resource = lock_resource
                 supervisor.pcrc_owner_lock_resource = owner_lock_resource
 
                 def finalize_detached_operation():
                     try:
-                        if job_handle:
-                            close_supervisor_job(job_handle)
+                        if os.name == 'nt' and child_handle:
+                            if terminate_child_process_tree(ready['pid'], child_handle):
+                                supervisor.pcrc_terminated = True
+                            close_child_process_handle(child_handle)
                         # On POSIX the child inherits the supervisor's lock
-                        # descriptor. On Windows the Job close above kills
-                        # any remaining descendants before this probe.
+                        # descriptor. On Windows the stable process handle
+                        # lets the parent kill a still-live child tree.
                         while True:
                             with store.try_resource_locked(lock_resource) as acquired:
                                 group_alive = False
@@ -604,8 +603,8 @@ class ControlCommander(PortableCommander):
                         self._terminate(supervisor)
                 except Exception:
                     pass
-                if job_handle:
-                    close_supervisor_job(job_handle)
+                if child_handle:
+                    close_child_process_handle(child_handle)
                 owner_release.set()
                 raise
 
@@ -615,7 +614,6 @@ class ControlCommander(PortableCommander):
         entry = self._sessions[identifier]
         entry['child_pid'] = entry['process'].pcrc_child_pid
         entry['supervisor_pid'] = entry['process'].pcrc_supervisor_pid
-        entry['job_handle'] = entry['process'].pcrc_job_handle
         entry['input_queue'] = queue.Queue(maxsize=4)
         threading.Thread(target=self._write_input, args=(entry,), daemon=True).start()
         threading.Thread(target=self._expire_process, args=(identifier,), daemon=True).start()
