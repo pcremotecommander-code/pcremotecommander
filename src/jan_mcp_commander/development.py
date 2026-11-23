@@ -395,7 +395,7 @@ class Development:
         if len(self.active)>=MAX_SESSIONS:raise ValueError('Development worker capacity reached')
         fd=self.worker_lock(identifier)
         if fd is None:raise ValueError('Development worker already running')
-        context=copy_context();context.run(coordinator(self.commander).depth.set,False)
+        context=copy_context();context.run(coordinator(self.commander).depth.set,None)
         self.update(identifier,status='preparing' if fn.__name__=='prepare' else 'applying',operation_started_at=time.time())
         def execute():
             try:context.run(fn,identifier)
