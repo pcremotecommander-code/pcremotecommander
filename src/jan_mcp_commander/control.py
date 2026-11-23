@@ -590,6 +590,7 @@ class ControlCommander(PortableCommander):
                                         operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
+                                    supervisor.pcrc_finalized = True
                                     break
                             time.sleep(0.05)
                     finally:
@@ -623,6 +624,8 @@ class ControlCommander(PortableCommander):
 
     @staticmethod
     def _terminate(proc):
+        if getattr(proc, 'pcrc_finalized', False):
+            return
         if os.name == 'posix' and getattr(proc, 'pcrc_child_pid', None):
             # Ask a live supervisor to kill the child process group. If the
             # supervisor has already crashed, do not signal a bare PID: the
