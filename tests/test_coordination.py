@@ -1059,10 +1059,12 @@ def test_assigned_task_lists_only_its_own_command_sessions(pc):
     second = claim(store, 'second session owner', ['file:second.txt'])
     pc._sessions['first-session'] = {
         'profile': 'operator_command', 'task_id': first['id'],
+        'started': time.monotonic(),
         'process': SimpleNamespace(pid=101, poll=lambda: None),
     }
     pc._sessions['second-session'] = {
         'profile': 'operator_command', 'task_id': second['id'],
+        'started': time.monotonic(),
         'process': SimpleNamespace(pid=202, poll=lambda: None),
     }
     first_view = assigned(first, pc.list_sessions)['sessions']
