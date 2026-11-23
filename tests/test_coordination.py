@@ -604,3 +604,26 @@ def test_task_reconciliation_cannot_release_live_operation_lock(pc):
         finally:
             release.set()
             future.result(timeout=5)
+
+
+
+def test_reconciliation_cannot_reopen_a_finished_task_for_late_operation_record(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'finished task', ['file:finished.txt'])
+    store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'],
+               status='completed')
+    with store.store.locked():
+        data = store.load()
+        data['operations']['late-review'] = {
+            'id': 'late-review',
+            'state': 'needs_review',
+            'resources': ['file:finished.txt'],
+            'owner': {'pid': 999999, 'thread': 3},
+            'task_id': lease['id'],
+            'started_at': 1000,
+        }
+        store.save(data)
+
+    with pytest.raises(CoordinationError, match='confirm reconciliation'):
+        store.task('reconcile', task_id=lease['id'], reviewed=True)
+    assert store.task('list')['tasks'][0]['status'] == 'completed'
