@@ -1,6 +1,6 @@
 # Resource-lock integration plan
 
-Status: resource-lock recovery and detached-command supervision are implemented on `work/full-concurrency-upgrade`; cross-platform CI verification is in progress. Production remains untouched.
+Status: resource-lock recovery and detached-command supervision are implemented on `work/full-concurrency-upgrade`; targeted Windows and Ubuntu CI suites pass. Production remains untouched.
 
 ## Current behavior
 
