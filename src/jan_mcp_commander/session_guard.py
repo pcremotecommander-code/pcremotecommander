@@ -139,7 +139,7 @@ def _assign_and_resume_windows_child(child, job_handle):
     kernel32 = _kernel32()
     kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
     kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-    process_handle = child._handle
+    process_handle = int(child._handle)
     if not kernel32.AssignProcessToJobObject(wintypes.HANDLE(job_handle), process_handle):
         error = ctypes.get_last_error()
         child.kill()
