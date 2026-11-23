@@ -506,3 +506,14 @@ def test_guard_allows_independent_resources_to_overlap(pc):
         one.result(timeout=5)
         two.result(timeout=5)
     assert entered == ['first', 'second']
+
+
+
+def test_nested_guard_cannot_widen_outer_resource_scope(pc):
+    store = coordinator(pc)
+    with store.guard(['file:parent.txt']):
+        with store.guard(['file:parent.txt/child.txt']):
+            pass
+        with pytest.raises(CoordinationError, match='nested operation cannot widen'):
+            with store.guard(['file:unrelated.txt']):
+                pytest.fail('widened nested operation executed')
