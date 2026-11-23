@@ -1253,9 +1253,10 @@ def test_linux_subreaper_reaps_descendants_across_repeated_fork_races(pc, tmp_pa
             for code in worker_codes
         )
         wait_for_workers = (
-            "deadline=time.monotonic()+5\n"
-            "while not all(os.path.exists(" + repr(str(path)) + ") for path in " +
-            repr([str(path) for path in worker_files]) + ") and time.monotonic()<deadline:\n"
+            "deadline=time.monotonic()+5\\n"
+            "while not all(os.path.exists(p) for p in " +
+            repr([str(worker_file) for worker_file in worker_files]) +
+            ") and time.monotonic()<deadline:\\n"
             "    time.sleep(0.002)"
         )
         parent = (
