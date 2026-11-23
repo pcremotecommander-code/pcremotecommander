@@ -41,6 +41,10 @@ class OperationNotApplied(PermissionDenied):
     """A precondition rejected a write before any mutation was attempted."""
 
 
+class OperationNotAppliedFileExists(OperationNotApplied, FileExistsError):
+    """A reviewed destination already exists; no workspace mutation was attempted."""
+
+
 
 def state_directory(workspace: Path, audit_path: Path | None = None) -> Path:
     default = Path.home() / '.local/state/jan-mcp-commander' / hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
