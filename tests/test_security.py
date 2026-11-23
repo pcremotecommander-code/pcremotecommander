@@ -187,16 +187,17 @@ def test_private_store_resource_lock_serializes_same_resource(cmd):
     assert second_entered.is_set()
 
 
-def _resource_lock_process_worker(state_dir, workspace, entered, release, acquired, errors):
+def _resource_lock_process_worker(state_dir, workspace, connection):
     try:
         store = PrivateStore(state_dir, workspace)
         with store.resource_locked('file:cross-process.txt'):
-            entered.set()
-            if release is not None and not release.wait(timeout=8):
-                raise TimeoutError('Timed out waiting for test release')
-            acquired.set()
+            connection.send('acquired')
+            if connection.recv() != 'release':
+                raise RuntimeError('Unexpected parent message')
     except BaseException as exc:
-        errors.put(repr(exc))
+        connection.send(('error', repr(exc)))
+    finally:
+        connection.close()
 
 
 def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
@@ -205,33 +206,33 @@ def test_private_store_resource_lock_serializes_separate_processes(tmp_path):
     workspace = tmp_path / 'workspace'
     state_dir = tmp_path / 'private-state'
     workspace.mkdir()
-    first_entered, second_entered = ctx.Event(), ctx.Event()
-    release_first, no_release = ctx.Event(), None
-    errors = ctx.Queue()
+    first_parent, first_child = ctx.Pipe()
+    second_parent, second_child = ctx.Pipe()
     first = ctx.Process(target=_resource_lock_process_worker,
-                        args=(state_dir, workspace, first_entered, release_first,
-                              ctx.Event(), errors))
+                        args=(state_dir, workspace, first_child))
     second = ctx.Process(target=_resource_lock_process_worker,
-                         args=(state_dir, workspace, second_entered, no_release,
-                               second_entered, errors))
+                         args=(state_dir, workspace, second_child))
     first.start()
     try:
-        assert first_entered.wait(timeout=5)
+        assert first_parent.poll(8), 'First process did not acquire the resource lock'
+        first_message = first_parent.recv()
+        assert first_message == 'acquired', first_message
         second.start()
-        assert not second_entered.wait(timeout=0.3)
-        release_first.set()
-        assert second_entered.wait(timeout=5)
+        assert not second_parent.poll(0.5), 'Second process acquired a held resource lock'
+        first_parent.send('release')
+        assert second_parent.poll(8), 'Second process did not acquire after release'
+        second_message = second_parent.recv()
+        assert second_message == 'acquired', second_message
+        second_parent.send('release')
         first.join(timeout=5)
         second.join(timeout=5)
         assert first.exitcode == 0
         assert second.exitcode == 0
-        assert errors.empty()
     finally:
-        release_first.set()
-        if first.is_alive():
-            first.terminate()
-        if second.pid is not None and second.is_alive():
-            second.terminate()
-        first.join(timeout=2)
-        if second.pid is not None:
-            second.join(timeout=2)
+        for process in (first, second):
+            if process.is_alive():
+                process.terminate()
+            if process.pid is not None:
+                process.join(timeout=2)
+        first_parent.close()
+        second_parent.close()
