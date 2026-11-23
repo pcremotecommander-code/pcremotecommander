@@ -11,6 +11,8 @@ on:
       - "src/jan_mcp_commander/development.py"
       - "tests/test_security.py"
       - "tests/test_coordination.py"
+      - "tests/test_development.py"
+      - "tests/test_browser_teaching.py"
       - ".github/workflows/resource-lock-tests.yml"
   pull_request:
     paths:
