@@ -834,7 +834,17 @@ class ControlCommander(PortableCommander):
 
     def list_sessions(self):
         self._check('commands')
-        return super().list_sessions()
+        result = super().list_sessions()
+        current = assignment.get()
+        if current is not None:
+            with self._lock:
+                owned = {session_id for session_id, entry in self._sessions.items()
+                         if entry.get('task_id') == current[0]}
+            result['sessions'] = [
+                session for session in result['sessions']
+                if session['session_id'] in owned
+            ]
+        return result
 
     def disable_control(self):
         self.close_control()
