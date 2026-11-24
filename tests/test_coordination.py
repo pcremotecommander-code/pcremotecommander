@@ -1785,3 +1785,76 @@ def test_read_only_uia_precondition_does_not_leave_uncertain_ui_reservation(pc,m
                  if record.get('kind')=='inspect_desktop_controls']
     assert len(records)==2
     assert all(record['state']=='failed' for record in records)
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='Linux guardian subreaper crash containment')
+def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp_path):
+    import os
+    import select
+    import signal
+    import time
+
+    store=coordinator(pc)
+    pid_file=tmp_path/'supervisor-crash-grandchild.pid'
+    release_file=tmp_path/'release-supervisor-crash-parent'
+    grandchild=(
+        "import os,time; "
+        "f=open("+repr(str(pid_file))+",'w'); "
+        "f.write(str(os.getpid())); f.flush(); f.close(); time.sleep(30)"
+    )
+    wait_for_grandchild=(
+        "deadline=time.monotonic()+10; "
+        "exec("+repr("while not os.path.exists("+repr(str(pid_file))+" ) and time.monotonic()<deadline: time.sleep(0.01)")+"); "
+        "if not os.path.exists("+repr(str(pid_file))+"): raise SystemExit(9)"
+    )
+    wait_for_release=(
+        "deadline=time.monotonic()+20; "
+        "exec("+repr("while not os.path.exists("+repr(str(release_file))+" ) and time.monotonic()<deadline: time.sleep(0.01)")+")"
+    )
+    parent=(
+        "import subprocess,sys,time,os; "
+        "subprocess.Popen([sys.executable,'-c',"+repr(grandchild)+"], "
+        "start_new_session=True,close_fds=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        +wait_for_grandchild+"; "+wait_for_release
+    )
+
+    result=pc.start_program(sys.executable,['-c',parent],timeout_seconds=25)
+    entry=pc._sessions[result['session_id']]
+    pidfd=None
+    try:
+        deadline=time.monotonic()+10
+        while not pid_file.exists() and time.monotonic()<deadline:
+            time.sleep(0.01)
+        assert pid_file.exists(), 'detached grandchild did not start'
+        pid=int(pid_file.read_text())
+        pidfd=os.pidfd_open(pid,0)
+
+        # Killing the outer supervisor must not orphan a detached process that
+        # closed inherited descriptors and left the command's process group.
+        entry['process'].kill()
+        entry['process'].wait(timeout=10)
+        if not entry['done'].wait(2):
+            # On an unsafe implementation the direct command still holds the
+            # inherited lock. Release it so the assertion can inspect the
+            # escaped grandchild instead of hanging the suite.
+            release_file.write_text('release')
+            assert entry['done'].wait(10), 'session finalizer did not release the reservation'
+
+        ready,_,_=select.select([pidfd],[],[],5)
+        if not ready:
+            signal.pidfd_send_signal(pidfd,signal.SIGKILL)
+        assert ready, 'detached grandchild survived supervisor crash after reservation release'
+
+        with store.store.locked():
+            records=[record for record in store.load()['operations'].values()
+                     if record.get('kind')=='detached_command']
+        assert records[-1]['state']=='needs_review'
+    finally:
+        release_file.write_text('release')
+        if pidfd is not None:
+            try:
+                ready,_,_=select.select([pidfd],[],[],0)
+                if not ready:
+                    signal.pidfd_send_signal(pidfd,signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.close(pidfd)
