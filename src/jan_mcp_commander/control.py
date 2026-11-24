@@ -1121,10 +1121,10 @@ class ControlCommander(PortableCommander):
             self._desktop_frame=None
             if (current is None or not isinstance(inspection_id,str) or inspection_id!=current[0] or
                 time.monotonic()-current[1]>30 or current[2]!=self._foreground_window()):
-                raise UIAutomationPreconditionError('UIA_INSPECTION_REQUIRED','Inspection missing, expired, consumed, or foreground changed; inspect again.'))
+                raise UIAutomationPreconditionError('UIA_INSPECTION_REQUIRED','Inspection missing, expired, consumed, or foreground changed; inspect again.')
             target=current[4].get(control_id) if isinstance(control_id,str) else None
             if target is None or action not in target['actions'] or not target['enabled']:
-                raise UIAutomationPreconditionError('UIA_TARGET_CHANGED','Choose an enabled supported control_id from a fresh inspection; names are not selectors.'))
+                raise UIAutomationPreconditionError('UIA_TARGET_CHANGED','Choose an enabled supported control_id from a fresh inspection; names are not selectors.')
             result=query({'handle':current[2],'window_stamp':current[3],'runtime_id':target['runtime_id'],
                           'stamp':target['stamp'],'action':action,'text':text},lambda:self._require_capability('desktop'))
             self._require_capability('desktop')
