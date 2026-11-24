@@ -9,6 +9,7 @@ import io
 import json
 import os
 import queue
+import secrets
 from pathlib import Path
 import shutil
 import signal
@@ -565,7 +566,51 @@ class ControlCommander(PortableCommander):
                 entry = self._sessions.get(result.get('session_id'))
                 if entry is not None:
                     entry['task_id'] = current[0]
+                    entry['task_lease_token'] = current[1]
+                    self._watch_task_lease(result.get('session_id'))
             return result
+
+    def _watch_task_lease(self, session_id):
+        """Stop a task-owned process as soon as its persisted lease is invalid."""
+        entry = self._sessions.get(session_id)
+        if entry is None or not entry.get('task_id') or not entry.get('task_lease_token'):
+            return
+        stop = threading.Event()
+        entry['task_lease_monitor_stop'] = stop
+
+        def monitor():
+            while not stop.wait(0.25):
+                done = entry.get('done')
+                process = entry.get('process')
+                if (done is not None and done.is_set()) or process is None or process.poll() is not None:
+                    return
+                valid = False
+                try:
+                    tasks = coordinator(self)
+                    with tasks.store.locked():
+                        data = tasks.load()
+                        tasks.expire(data)
+                        task = data.get('tasks', {}).get(entry['task_id'])
+                        valid = bool(
+                            task
+                            and task.get('status') == 'active'
+                            and task.get('expires_at', 0) > tasks.clock()
+                            and isinstance(task.get('lease_token'), str)
+                            and secrets.compare_digest(task['lease_token'], entry['task_lease_token'])
+                        )
+                except Exception:
+                    # An unreadable lease cannot authorize a running process.
+                    valid = False
+                if not valid:
+                    entry['task_lease_expired'] = True
+                    self._terminate(process)
+                    return
+
+        threading.Thread(
+            target=monitor,
+            name='pcrc-task-lease-monitor',
+            daemon=True,
+        ).start()
 
     @coordinated('workspace')
     def start_process(self, command, shell='system', timeout_seconds=300):
