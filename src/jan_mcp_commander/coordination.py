@@ -674,6 +674,22 @@ class Coordination:
                         )
                         self.save(data)
                 raise
+            except CoordinationError as exc:
+                # Coordination rejections are pre-dispatch by contract. The
+                # browser workflow uses WORKFLOW_OUTCOME_UNKNOWN only when a
+                # replay step may already have reached the page; that one must
+                # retain its reservation for explicit review.
+                state = 'needs_review' if exc.code == 'WORKFLOW_OUTCOME_UNKNOWN' else 'failed'
+                note = ('A browser step may have been dispatched; inspect actual effects before retrying.'
+                        if state == 'needs_review' else
+                        'Coordination rejected the operation before external work began.')
+                with self.store.locked():
+                    data = self.load()
+                    record = data.get('operations', {}).get(operation_id)
+                    if record and record.get('state') == 'active':
+                        record.update(state=state, note=note, finished_at=self.clock())
+                        self.save(data)
+                raise
             except BaseException:
                 with self.store.locked():
                     data = self.load()
