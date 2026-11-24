@@ -1858,3 +1858,32 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
             except ProcessLookupError:
                 pass
             os.close(pidfd)
+
+def test_task_state_exposes_sanitized_unresolved_operation_ids_for_recovery(pc):
+    store=coordinator(pc)
+    operation_id='a'*32
+    with store.store.locked():
+        data=store.load()
+        data.setdefault('operations',{})[operation_id]={
+            'id':operation_id,
+            'state':'active',
+            'kind':'write_text',
+            'resources':['file:private/secret-document.docx'],
+            'task_id':None,
+            'started_at':store.clock(),
+        }
+        store.save(data)
+
+    state=store.task('list')
+    assert state['operations']==[{
+        'operation_id':operation_id,
+        'state':'active',
+        'kind':'write_text',
+        'task_id':None,
+        'resource_scopes':['files'],
+        'started_at':state['operations'][0]['started_at'],
+    }]
+    assert 'secret-document.docx' not in repr(state)
+
+    reviewed=store.task('reconcile_operation',operation_id=operation_id,reviewed=True)
+    assert reviewed['state']=='abandoned_after_review'
