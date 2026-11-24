@@ -374,7 +374,7 @@ class ControlCommander(PortableCommander):
         if not isinstance(source, str) or not isinstance(destination, str) or source.casefold() == destination.casefold():
             raise PermissionDenied('Choose distinct workspace paths')
         if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
-            raise PermissionDenied('Expected SHA256 required')
+            raise OperationNotApplied('Expected SHA256 required')
         self._audit('move_intent', True, str(source))
         try:
             with self._lock, self._store.locked():
@@ -382,7 +382,7 @@ class ControlCommander(PortableCommander):
                 if unsupported_content(data):
                     raise PermissionDenied('Binary or private key data denied')
                 if hashlib.sha256(data).hexdigest() != expected_sha256:
-                    raise PermissionDenied('File changed; read it again before modifying')
+                    raise OperationNotApplied('File changed; read it again before modifying')
                 backup_id = self._store.backup(source, data)
                 self._tree.write(destination, data, overwrite=False)
                 try:
@@ -1007,11 +1007,12 @@ class ControlCommander(PortableCommander):
         try:
             return self._browser_executor.submit(copy_context().run, workflow_action, self, action, options or {}).result(timeout=18)
         except CoordinationError as exc:
-            # workflow_action records WORKFLOW_OUTCOME_UNKNOWN only after a
-            # browser step has been dispatched. Other workflow conflicts are
-            # rejected before dispatch and must not poison the UI reservation.
+            # workflow_action reports all validation and state conflicts before
+            # dispatch as CoordinationError. Preserve its public code/type while
+            # allowing the outer reservation to close as a safe rejection.
             if exc.code != 'WORKFLOW_OUTCOME_UNKNOWN':
-                raise OperationNotApplied(str(exc)) from exc
+                from .coordination import SafeCoordinationError
+                raise SafeCoordinationError(exc.code, str(exc)) from exc
             raise
         except ValueError as exc:
             # Invalid workflow arguments are rejected before any replay step.
@@ -1145,8 +1146,13 @@ class ControlCommander(PortableCommander):
             target=current[4].get(control_id) if isinstance(control_id,str) else None
             if target is None or action not in target['actions'] or not target['enabled']:
                 raise UIAutomationPreconditionError('UIA_TARGET_CHANGED','Choose an enabled supported control_id from a fresh inspection; names are not selectors.')
-            result=query({'handle':current[2],'window_stamp':current[3],'runtime_id':target['runtime_id'],
-                          'stamp':target['stamp'],'action':action,'text':text},lambda:self._require_capability('desktop'))
+            try:
+                result=query({'handle':current[2],'window_stamp':current[3],'runtime_id':target['runtime_id'],
+                              'stamp':target['stamp'],'action':action,'text':text},lambda:self._require_capability('desktop'))
+            except UIAutomationError as exc:
+                if exc.code in {'UIA_TARGET_CHANGED', 'UIA_PROTECTED', 'UIA_UNSUPPORTED', 'UIA_FILE_DIALOG'}:
+                    raise UIAutomationPreconditionError(exc.code, str(exc)) from exc
+                raise
             self._require_capability('desktop')
             public=self._uia_public(result)
             return {**public,'performed':result.get('performed',False),'action':action,
