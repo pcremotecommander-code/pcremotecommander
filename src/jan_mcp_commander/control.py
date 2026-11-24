@@ -725,8 +725,12 @@ class ControlCommander(PortableCommander):
                                         # returns 125 when descendant cleanup was required
                                         # or supervision ended abnormally; those outcomes
                                         # remain review-required.
-                                        operation_id, success=(not getattr(supervisor, 'pcrc_terminated', False)
-                                                    and supervisor.returncode != 125),
+                                        operation_id, success=(
+                                            not getattr(supervisor, 'pcrc_terminated', False)
+                                            and supervisor.returncode is not None
+                                            and supervisor.returncode >= 0
+                                            and supervisor.returncode != 125
+                                        ),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     supervisor.pcrc_finalized = True
