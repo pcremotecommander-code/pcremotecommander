@@ -400,17 +400,22 @@ def test_controlled_process_rechecks_permission_at_locked_launch(control,monkeyp
     assert not control._sessions
 
 def test_disable_control_stops_legacy_profile_sessions_without_done_event(control):
+    import os
     import subprocess
     import time
 
+    options=(
+        {'creationflags':subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name=='nt' else {'start_new_session':True}
+    )
     process=subprocess.Popen(
         [sys.executable,'-I','-c','import time; time.sleep(60)'],
         cwd=control.workspace,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        start_new_session=True,
         shell=False,
+        **options,
     )
     session_id='legacy-profile-session'
     control._sessions[session_id]={
