@@ -399,19 +399,31 @@ def test_controlled_process_rechecks_permission_at_locked_launch(control,monkeyp
         )
     assert not control._sessions
 
-def test_disable_control_stops_fixed_profile_sessions_without_done_event(control,monkeypatch):
-    monkeypatch.setattr(
-        control,
-        '_argv',
-        lambda profile:[sys.executable,'-I','-c','import time; time.sleep(60)'],
+def test_disable_control_stops_legacy_profile_sessions_without_done_event(control):
+    import subprocess
+    import time
+
+    process=subprocess.Popen(
+        [sys.executable,'-I','-c','import time; time.sleep(60)'],
+        cwd=control.workspace,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        shell=False,
     )
-    info=control.start_session('git_status')
-    session_id=info['session_id']
-    entry=control._sessions[session_id]
-    assert 'done' not in entry
-    assert entry['process'].poll() is None
+    session_id='legacy-profile-session'
+    control._sessions[session_id]={
+        'process':process,
+        'profile':'git_status',
+        'started':time.monotonic(),
+        'output':bytearray(),
+        'truncated':False,
+    }
+    assert process.poll() is None
 
     control.disable_control()
 
-    assert entry['process'].poll() is not None
+    assert process.poll() is not None
     assert session_id not in control._sessions
+    process.stdout.close()
