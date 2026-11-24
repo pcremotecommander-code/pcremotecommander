@@ -29,7 +29,7 @@ test('Security and Backups is integrated into the MFA-protected owner admin navi
   assert.match(html,/No production backup has been run/);
   assert.match(html,/restore drill/i);
   assert.match(html,/href="\/admin\/security-backups" aria-current="page"/);
-  assert.doesNotMatch(html,/access_key=[^\\s<]+|secret_value=[^\\s<]+|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
+  assert.doesNotMatch(html,/access_key=\S+|secret_value=\S+|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
   assert.equal((await f.request('/admin/security-backups?unexpected=1')).status,400);
   assert.equal((await f.post('/admin/security-backups')).status,405);
 });
