@@ -63,6 +63,24 @@ test('Cloudflare runtime: browser approval, signed WSS, real OAuth and Python MC
     const approved=await (await json('/devices/pair/proof',proof(pair,'collect',key.privateKey,base))).json();
     assert.equal(approved.status,'consumed');
     assert.equal((await form('/devices/select',{id:approved.session.id})).status,303);
+    // Synthetic account Durable Object: the backup manifest must be signed, read-only and metadata-only.
+    const accountStub=mf.getDurableObjectNamespace('DEVICES').get(mf.getDurableObjectNamespace('DEVICES').idFromName('1234'));
+    const manifestBody='{}',manifestPath='/backup/manifest',manifestTime=String(Date.now());
+    const hmac=async message=>{const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(bindings.JAN_PROXY_KEY),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(message)));return Buffer.from(bytes).toString('base64url');};
+    const operatorKey=await hmac('JAN_DEVICE_KEY_V1\\n'+'PCRC_OPERATOR_V1\\n'+manifestPath+'\\n1234\\n'+manifestTime+'\\n'+manifestBody);
+    const unsigned=await accountStub.fetch('https://internal.invalid'+manifestPath,{method:'POST',headers:{'Content-Type':'application/json','X-Jan-Account-Id':'1234'},body:manifestBody});
+    assert.equal(unsigned.status,403,'Backup manifest must reject unsigned requests');
+    const wrongMethod=await accountStub.fetch('https://internal.invalid'+manifestPath,{method:'GET',headers:{'X-Jan-Account-Id':'1234'}});
+    assert.equal(wrongMethod.status,405,'Backup manifest must reject non-POST methods');
+    const signed=await accountStub.fetch('https://internal.invalid'+manifestPath,{method:'POST',headers:{'Content-Type':'application/json','X-Jan-Account-Id':'1234','X-PCRC-Operator-Time':manifestTime,'X-PCRC-Operator-Proof':operatorKey},body:manifestBody});
+    assert.equal(signed.status,200,'Signed synthetic account manifest should succeed');
+    const manifest=await signed.json();
+    assert.equal(manifest.schemaVersion,1);
+    assert.equal(manifest.accountId,'1234');
+    assert.equal(typeof manifest.keyCount,'number');
+    assert.equal(typeof manifest.complete,'boolean');
+    assert.equal(typeof manifest.countsByPrefix,'object');
+    assert.equal(Object.hasOwn(manifest,'values'),false,'Manifest must not expose stored values');
     const connect=async(session=approved.session,privateKey=key.privateKey,localPort=port,enabled=[])=>{
       const result=await call('/jan-relay/connect',{headers:{Upgrade:'websocket','X-PCRC-Terminal-Status':'1','X-JAN-Device-Proof':JSON.stringify(handshake(session,privateKey))}});
       assert.equal(result.status,101);assert.equal(result.headers.get('X-PCRC-Account-Id'),'1234');assert.equal(result.headers.get('X-PCRC-Account-Name'),'test-owner');const ws=result.webSocket;ws.accept();
