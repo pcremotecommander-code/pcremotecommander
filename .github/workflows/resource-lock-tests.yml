@@ -72,3 +72,5 @@ jobs:
 # Re-run Windows and Ubuntu regression coverage after fixing the session-test import.
 
 # Re-run the Windows and Ubuntu suites with complete process test doubles.
+
+# Trigger a fresh cross-platform recovery run after the latest concurrency-audit fixes.
