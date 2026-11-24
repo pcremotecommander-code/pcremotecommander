@@ -398,3 +398,20 @@ def test_controlled_process_rechecks_permission_at_locked_launch(control,monkeyp
             timeout_seconds=5,
         )
     assert not control._sessions
+
+def test_disable_control_stops_fixed_profile_sessions_without_done_event(control,monkeypatch):
+    monkeypatch.setattr(
+        control,
+        '_argv',
+        lambda profile:[sys.executable,'-I','-c','import time; time.sleep(60)'],
+    )
+    info=control.start_session('git_status')
+    session_id=info['session_id']
+    entry=control._sessions[session_id]
+    assert 'done' not in entry
+    assert entry['process'].poll() is None
+
+    control.disable_control()
+
+    assert entry['process'].poll() is not None
+    assert session_id not in control._sessions
