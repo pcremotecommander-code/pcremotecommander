@@ -55,7 +55,7 @@ class AdvancedCommander(Commander):
                 raise OperationNotApplied('File changed; read it again before modifying')
         except OperationNotApplied:
             raise
-        except (PermissionDenied, ValueError) as exc:
+        except (PermissionDenied, ValueError, OSError) as exc:
             # PDF parsing and validation are read-only; the write starts below.
             raise OperationNotApplied(str(exc)) from exc
         result = self._write_binary(destination, value['bytes'], overwrite=overwrite,
