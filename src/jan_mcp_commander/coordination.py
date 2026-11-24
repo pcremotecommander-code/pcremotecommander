@@ -609,7 +609,18 @@ class Coordination:
             raise CoordinationError('TASK_LEASE_REQUIRED', 'Assignment expired or token does not match. Inspect list_tasks; uncertain operations require reconciliation.')
 
     def running(self, task_id):
-        return any(entry.get('task_id') == task_id and not entry['done'].is_set() for entry in self.commander._sessions.values())
+        for entry in self.commander._sessions.values():
+            if entry.get('task_id') != task_id:
+                continue
+            done = entry.get('done')
+            if done is not None:
+                if not done.is_set():
+                    return True
+                continue
+            process = entry.get('process')
+            if process is not None and process.poll() is None:
+                return True
+        return False
 
     @contextmanager
     def guard(self, resources, *, allow_active_sessions=False, defer_task_scope=False, operation_kind=None):
@@ -793,10 +804,13 @@ def coordinated(kind, *paths):
                 operation_kind=method.__name__,
             ):
                 result = method(self, *args, **kwargs)
-                if assignment.get() and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
+                current = assignment.get()
+                if current and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
                     entry = self._sessions.get(result.get('session_id'))
                     if entry is not None:
-                        entry['task_id'] = assignment.get()[0]
+                        entry['task_id'] = current[0]
+                        entry['task_lease_token'] = current[1]
+                        self._watch_task_lease(result.get('session_id'))
                 return result
         return guarded
     return decorate
