@@ -195,6 +195,11 @@ class DocumentWorkflow:
                 if task is None:
                     raise CoordinationError('TASK_NOT_FOUND','Task not found; call list_tasks.')
                 tasks.validate(task,current[1])
+            if task.get('revision') != plan.get('task_revision'):
+                raise CoordinationError(
+                    'TASK_LEASE_REQUIRED',
+                    'Document review belongs to an earlier task lease. Preview a new review under the current assignment.',
+                )
         value=self.public(plan)
         if value['status'] in {'preparing','applying'}:
             with self.run_lock:event=self.running.get(plan_id)
@@ -217,7 +222,18 @@ class DocumentWorkflow:
                 destinations.add(target)
         identifier=uuid.uuid4().hex
         current=assignment.get()
-        plan={'plan_id':identifier,'task_id':current[0] if current else None,'status':'preparing','expires_at':time.time()+900,'jobs':[],'prepared':[],'review_sha256':''}
+        task_revision=None
+        if current:
+            tasks=coordinator(self.commander)
+            with tasks.store.locked():
+                data=tasks.load()
+                tasks.expire(data)
+                task=data['tasks'].get(current[0])
+                if task is None:
+                    raise CoordinationError('TASK_NOT_FOUND','Task not found; call list_tasks.')
+                tasks.validate(task,current[1])
+                task_revision=task.get('revision')
+        plan={'plan_id':identifier,'task_id':current[0] if current else None,'task_revision':task_revision,'status':'preparing','expires_at':time.time()+900,'jobs':[],'prepared':[],'review_sha256':''}
         with self.store.locked():
             plans=self.load()
             plans={k:v for k,v in plans.items() if v['status']=='applying' or v['expires_at']>time.time()}
