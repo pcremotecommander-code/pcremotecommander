@@ -51,7 +51,10 @@ def test_background_owned_process_stops(control):
     proc=control._sessions[info['session_id']]['process']
     result=control.stop_session(info['session_id'])
     assert result['stopped']==info['session_id']
-    assert result['pid']==proc.pid
+    # The public pid identifies the actual command child; the Popen handle
+    # retained by PCRC supervises it and is reported separately.
+    assert result['pid']==proc.pcrc_child_pid
+    assert result['supervisor_pid']==proc.pid
     assert result['running'] is False
     assert result['exit_code']==proc.poll() and result['exit_code'] is not None
     assert result['session_retained'] is False
