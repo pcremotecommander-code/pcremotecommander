@@ -773,6 +773,7 @@ class ControlCommander(PortableCommander):
         if getattr(proc, 'pcrc_finalized', False):
             return
         if os.name == 'nt' and getattr(proc, 'pcrc_job_handle', None):
+            from .session_guard import windows_job_active_processes, terminate_windows_job_and_wait
             job_handle = proc.pcrc_job_handle
             try:
                 active = windows_job_active_processes(job_handle)
