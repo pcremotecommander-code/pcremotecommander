@@ -1407,24 +1407,39 @@ class ControlCommander(PortableCommander):
                 # Keep them visible and fail shutdown rather than assuming exit.
                 remaining.append(session_id)
                 continue
-            try:
-                PortableCommander.stop_session(self, session_id)
-            except Exception:
-                # Do not hide a failed cleanup by deleting the session. The
-                # collector/finalizer keeps its receipt and locks fail closed.
+            done_event = entry.get('done')
+            if done_event is None:
+                # Legacy AdvancedCommander sessions have no collector thread;
+                # stop and reap their process directly instead of calling the
+                # newer PortableCommander.stop_session contract.
                 try:
                     self._terminate(process)
                 except Exception:
                     pass
+            elif callable(getattr(done_event, 'wait', None)) and callable(getattr(done_event, 'is_set', None)):
+                try:
+                    PortableCommander.stop_session(self, session_id)
+                except Exception:
+                    # Do not hide a failed cleanup by deleting the session.
+                    try:
+                        self._terminate(process)
+                    except Exception:
+                        pass
+            else:
+                remaining.append(session_id)
+                continue
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
-            done_event = entry.get('done')
             if done_event is not None:
                 done_event.wait(5)
             process_exited = process.poll() is not None
             collector_finished = done_event is None or done_event.is_set()
+            if done_event is None and process_exited:
+                with self._lock:
+                    self._sessions.pop(session_id, None)
+                self._audit('stop_session', True, session_id)
             if not process_exited or not collector_finished:
                 remaining.append(session_id)
                 # The base stop method removes entries immediately after
