@@ -1554,7 +1554,7 @@ def register_control_tools(server, commander):
     @directory_tool(server, annotations=control)
     @tool_errors(commander)
     def jan_team(action: str, options: dict | None = None) -> dict:
-        """Manage local shared assignments. A task label never grants OS permissions."""
+        """Manage local shared assignments and explicit recovery. Actions include create, claim, renew, finish, reconcile and reconcile_operation; inspect jan_task_state for unresolved operation IDs. A task label never grants OS permissions."""
         commander._check('files')
         return coordinator(commander).task(action, **(options or {}))
 
