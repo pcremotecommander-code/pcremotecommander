@@ -179,7 +179,7 @@ class ControlCommander(PortableCommander):
                 raise OperationNotApplied('File changed; inspect it again before editing')
         except OperationNotApplied:
             raise
-        except (PermissionDenied, ValueError) as exc:
+        except (PermissionDenied, ValueError, OSError) as exc:
             # Office processing is read-only until _write_binary below.
             raise OperationNotApplied(str(exc)) from exc
         if dry_run:
@@ -229,7 +229,7 @@ class ControlCommander(PortableCommander):
                 raise OperationNotApplied('Source changed; inspect it again')
         except OperationNotApplied:
             raise
-        except (PermissionDenied, ValueError) as exc:
+        except (PermissionDenied, ValueError, OSError) as exc:
             # Media processing only reads the source and builds output in
             # memory. The workspace write begins only after this preflight.
             raise OperationNotApplied(str(exc)) from exc
