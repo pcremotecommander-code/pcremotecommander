@@ -154,6 +154,8 @@ class AdvancedCommander(Commander):
             raise PermissionDenied('Invalid write options')
         try:
             return self._write(path, content, overwrite)
+        except OperationNotApplied:
+            raise
         except (OSError, ValueError) as exc:
             raise PermissionDenied('Write denied') from exc
 
