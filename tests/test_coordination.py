@@ -2287,3 +2287,51 @@ def test_unhashable_persisted_task_status_raises_coordination_error(pc, status):
 
     with pytest.raises(CoordinationError, match="state"):
         store.load()
+
+
+@pytest.mark.parametrize("run_record", [None, [], {"status": "unknown"}, {"task_id": [], "status": "unknown"}])
+def test_malformed_run_records_are_rejected_during_task_handoff(pc, run_record):
+    store = coordinator(pc)
+    lease = claim(store, "handoff with malformed run", ["ui"])
+    with store.store.locked():
+        data = store.load()
+        data["runs"]["broken"] = run_record
+        store.save(data)
+
+    with pytest.raises(CoordinationError) as error:
+        store.task(
+            "finish",
+            task_id=lease["id"],
+            lease_token=lease["lease_token"],
+            status="completed",
+        )
+    assert error.value.code == "TASK_STATE_INVALID"
+
+
+@pytest.mark.parametrize("run_record", [None, [], {"status": "unknown"}, {"task_id": [], "status": "unknown"}])
+def test_malformed_run_records_are_rejected_during_reconciliation(pc, run_record):
+    store = coordinator(pc)
+    lease = claim(store, "reconcile malformed run", ["ui"])
+    with store.store.locked():
+        data = store.load()
+        data["tasks"][lease["id"]]["status"] = "needs_review"
+        data["runs"]["broken"] = run_record
+        store.save(data)
+
+    with pytest.raises(CoordinationError) as error:
+        store.task("reconcile", task_id=lease["id"], reviewed=True)
+    assert error.value.code == "TASK_STATE_INVALID"
+
+
+@pytest.mark.parametrize("expires_at", [10**400, -(10**400)])
+def test_extreme_expiry_integer_is_rejected_as_invalid_task_state(pc, expires_at):
+    store = coordinator(pc)
+    lease = claim(store, "extreme expiry", ["ui"])
+    with store.store.locked():
+        data = store.load()
+        data["tasks"][lease["id"]]["expires_at"] = expires_at
+        store.save(data)
+
+    with pytest.raises(CoordinationError) as error:
+        store.load()
+    assert error.value.code == "TASK_STATE_INVALID"
