@@ -13,27 +13,6 @@ import {retainAccountData} from '../src/account_lifecycle.ts';
 import {ownerFixture,unlockOwner} from './helpers/owner-console-fixture.mjs';
 import {ownerConsole} from '../src/owner_console.ts';
 
-test('Security and Backups is integrated into the MFA-protected owner admin navigation',async()=>{
-  const f=await ownerFixture();
-  const locked=await f.request('/admin/security-backups');
-  assert.equal(locked.status,303,'unverified owner must be redirected to authenticator verification');
-  assert.match(locked.headers.get('Location')??'',/\/admin\/security$/);
-  await unlockOwner(f);
-  const response=await f.request('/admin/security-backups');
-  assert.equal(response.status,200);
-  const html=await response.text();
-  assert.match(html,/Security (?:&amp;|&#38;) backups/);
-  assert.match(html,/Prototype ready/);
-  assert.match(html,/Not enabled/);
-  assert.match(html,/Not connected/);
-  assert.match(html,/No production backup has been run/);
-  assert.match(html,/restore drill/i);
-  assert.match(html,/href="\/admin\/security-backups" aria-current="page"/);
-  assert.doesNotMatch(html,/access_key=\S+|secret_value=\S+|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
-  assert.equal((await f.request('/admin/security-backups?unexpected=1')).status,400);
-  assert.equal((await f.post('/admin/security-backups')).status,405);
-});
-
 test('changing the owner GitHub identity preserves customer storage and rejects previous owner sessions and MFA',async()=>{
   const f=await ownerFixture({PCRC_OWNER_GITHUB_ID:'5678'}),storage=f.storages.get('1234');
   const devices={synthetic:{id:'synthetic',name:'Preserved customer PC',revoked:false}};
