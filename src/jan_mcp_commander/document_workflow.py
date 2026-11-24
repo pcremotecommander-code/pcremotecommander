@@ -14,7 +14,7 @@ from contextvars import copy_context
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .coordination import coordinator, resource
+from .coordination import CoordinationError, coordinator, resource
 from .environment import runtime_environment
 from .privacy import assert_public_text
 from .safe_fs import parts
@@ -134,10 +134,15 @@ class DocumentWorkflow:
         context=copy_context()
         def execute():
             def run_without_parent_reservation():
+                # The scheduling API itself holds a workspace reservation.
+                # Wait for that outer call to return before the background
+                # worker tries to acquire its narrower source/output locks.
+                coordination=coordinator(self.commander)
+                with coordination.store.resource_locked('workspace'):
+                    pass
                 # Keep the claimed task identity, but do not inherit the
                 # scheduling call's workspace reservation into this worker.
                 # The worker must acquire and validate each exact file scope.
-                coordination=coordinator(self.commander)
                 marker=coordination.depth.set(None)
                 try:
                     return function(*args)
@@ -230,7 +235,7 @@ class DocumentWorkflow:
                 record={'status':'ready','kind':job['kind'],'sources':hashes,'review':result['review'],
                     'outputs':[{'path':o['path'],'sha256':digest(o['bytes']),'bytes':len(o['bytes'])} for o in result['outputs']]}
                 records.append(record);prepared.append({'job':job,'sources':hashes})
-            except (ValueError,OSError) as exc:
+            except (CoordinationError,ValueError,OSError) as exc:
                 message=str(exc)[:240]
                 try: assert_public_text(message)
                 except ValueError: message='Private content was blocked'
