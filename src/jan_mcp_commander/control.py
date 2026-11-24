@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from .core import OperationNotApplied, OperationNotAppliedFileExists, PermissionDenied
 from .portable import PortableCommander
-from .coordination import coordinated, coordinator, assignment
+from .coordination import coordinated, coordinator, assignment, CoordinationError
 
 CAPABILITIES = frozenset({'files', 'commands', 'browser', 'desktop'})
 # Shared with OriginGuard; the gateway keeps an independent fail-closed policy.
@@ -106,6 +106,8 @@ class ControlCommander(PortableCommander):
         self._audit('document_preview', True, 'bounded document review')
         try:
             return self._documents().preview(jobs)
+        except (CoordinationError, OperationNotApplied):
+            raise
         except ValueError as exc:
             # Document preview validation and capacity checks happen before
             # worker dispatch; no document output can have been written.
@@ -121,6 +123,8 @@ class ControlCommander(PortableCommander):
             # before dispatch. A ValueError here is a safe pre-dispatch reject;
             # document writes happen asynchronously only after it returns.
             return self._documents().apply(plan_id, review_sha256, review)
+        except (CoordinationError, OperationNotApplied):
+            raise
         except ValueError as exc:
             raise OperationNotApplied(str(exc)) from exc
 
