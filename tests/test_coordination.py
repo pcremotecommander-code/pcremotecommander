@@ -1092,6 +1092,7 @@ def test_fixed_profile_session_records_task_owner_and_requires_commands_capabili
     result = assigned(lease, lambda: pc.start_session('disk_usage'))
     entry = pc._sessions[result['session_id']]
     assert entry.get('task_id') == lease['id']
+    assert entry.get('task_lease_token') == lease['lease_token']
     assert assigned(lease, lambda: pc.stop_session(result['session_id']))['stopped'] == result['session_id']
 
 
@@ -1974,3 +1975,27 @@ def test_task_owned_command_is_stopped_when_persisted_lease_expires(pc):
         )
     assert task['status'] == 'needs_review'
     assert operation['state'] == 'needs_review'
+
+def test_command_session_cannot_transfer_to_new_lease_for_same_task(pc):
+    store=coordinator(pc)
+    first=claim(store,'lease-bound command session',['workspace'])
+    result=assigned(first,lambda:pc.start_program(
+        sys.executable,['-c','import time; print("lease-owned"); time.sleep(0.2)'],
+        timeout_seconds=5))
+    entry=pc._sessions[result['session_id']]
+    assert entry['task_id']==first['id']
+    assert entry['task_lease_token']==first['lease_token']
+    assert entry['done'].wait(10)
+
+    store.task('finish',task_id=first['id'],lease_token=first['lease_token'],status='queued')
+    second=store.task('claim',task_id=first['id'],agent='next worker',resources=['workspace'])
+    assert second['lease_token']!=first['lease_token']
+
+    with pytest.raises(PermissionDenied,match='earlier lease'):
+        assigned(second,lambda:pc.process_output(result['session_id']))
+    visible=assigned(second,pc.list_sessions)['sessions']
+    assert result['session_id'] not in {item['session_id'] for item in visible}
+
+    # The unassigned local operator can still inspect old sessions, while a
+    # different task lease cannot inherit their access.
+    assert 'lease-owned' in pc.process_output(result['session_id'])['output']
