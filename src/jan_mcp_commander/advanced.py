@@ -49,9 +49,15 @@ class AdvancedCommander(Commander):
             raise PermissionDenied('Choose a relative PDF destination')
         if overwrite and not expected_destination_sha256:
             raise PermissionDenied('Inspect the overwrite destination first; its SHA-256 is required')
-        value = process_pdf(self._tree, path, pages=pages, rotation=rotation,deadline=deadline)
-        if value['sha256'] != expected_sha256:
-            raise PermissionDenied('File changed; read it again before modifying')
+        try:
+            value = process_pdf(self._tree, path, pages=pages, rotation=rotation,deadline=deadline)
+            if value['sha256'] != expected_sha256:
+                raise OperationNotApplied('File changed; read it again before modifying')
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied, ValueError) as exc:
+            # PDF parsing and validation are read-only; the write starts below.
+            raise OperationNotApplied(str(exc)) from exc
         result = self._write_binary(destination, value['bytes'], overwrite=overwrite,
                                     expected_sha256=expected_destination_sha256,deadline=deadline)
         return {**result, 'page_count': value['page_count'], 'source_sha256': value['sha256']}
