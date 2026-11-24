@@ -476,7 +476,50 @@ class Coordination:
                 held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
                 recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
                 shown = held + recent[-max(1, 20 - len(held)):]
-                return {'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]], 'truncated': len(tasks) > 20}
+                unresolved = []
+                for identifier, operation in data.get('operations', {}).items():
+                    if not isinstance(operation, dict):
+                        unresolved.append({
+                            'operation_id': identifier,
+                            'state': 'malformed',
+                            'kind': 'unknown',
+                            'task_id': None,
+                            'resource_scopes': ['workspace'],
+                        })
+                        continue
+                    if operation.get('state') not in {'active', 'needs_review'}:
+                        continue
+                    resources = operation.get('resources')
+                    scopes = set()
+                    if not isinstance(resources, list) or not resources:
+                        scopes.add('workspace')
+                    else:
+                        for item in resources:
+                            if item == 'workspace' or item == 'ui':
+                                scopes.add(item)
+                            elif isinstance(item, str) and item.startswith('file:'):
+                                scopes.add('files')
+                            else:
+                                scopes.add('unknown')
+                    summary = {
+                        'operation_id': identifier,
+                        'state': operation.get('state'),
+                        'kind': operation.get('kind') if isinstance(operation.get('kind'), str) else 'unknown',
+                        'task_id': operation.get('task_id'),
+                        'resource_scopes': sorted(scopes) or ['unknown'],
+                    }
+                    if isinstance(operation.get('started_at'), (int, float)):
+                        summary['started_at'] = operation['started_at']
+                    if isinstance(operation.get('note'), str):
+                        summary['note'] = operation['note'][:240]
+                    unresolved.append(summary)
+                unresolved.sort(key=lambda item: (item.get('started_at', 0), item['operation_id']))
+                return {
+                    'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]],
+                    'truncated': len(tasks) > 20,
+                    'operations': unresolved[:100],
+                    'operations_truncated': len(unresolved) > 100,
+                }
             if action == 'create':
                 title = args.get('title', '')
                 if len(tasks) >= 100:
