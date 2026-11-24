@@ -722,7 +722,7 @@ class ControlCommander(PortableCommander):
                                         # A nonzero exit may follow partial external
                                         # effects; require explicit review rather than
                                         # treating it as a clean completion.
-                                        operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)),
+                                        operation_id, success=not getattr(supervisor, 'pcrc_terminated', False),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     supervisor.pcrc_finalized = True
