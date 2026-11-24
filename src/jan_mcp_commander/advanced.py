@@ -126,6 +126,10 @@ class AdvancedCommander(Commander):
         try:
             with self._tree.parent(path):
                 pass
+        except FileNotFoundError as exc:
+            # Keep the public parent-directory diagnostic while marking this
+            # verified pre-mutation failure as safe to retry after correction.
+            raise OperationNotApplied('Write denied') from exc
         except (OSError, ValueError) as exc:
             raise OperationNotApplied('Write path is unavailable or unsafe') from exc
         # Preflight audit must succeed before backup or workspace mutation.
