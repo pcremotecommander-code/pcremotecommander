@@ -2386,3 +2386,68 @@ def test_extreme_expiry_integer_is_rejected_as_invalid_task_state(pc, expires_at
     with pytest.raises(CoordinationError) as error:
         store.load()
     assert error.value.code == "TASK_STATE_INVALID"
+
+
+def test_expired_ui_reservation_does_not_freeze_workspace_operations(pc):
+    """An abandoned desktop reservation must not block file tools forever.
+
+    A ``ui`` reservation covers desktop automation only. Once its lease
+    expires the task is uncertain for desktop work, but writing files through
+    the workspace tools cannot disturb it, so the machine must stay usable.
+    """
+    now = [1000]
+    store = coordinator(pc)
+    abandoned = claim(store, "Abandoned desktop session", ["ui"])
+    with store.store.locked():
+        data = store.load()
+        data["tasks"][abandoned["id"]]["expires_at"] = 0
+        store.save(data)
+    listed = {item["id"]: item for item in store.task("list")["tasks"]}
+    assert listed[abandoned["id"]]["status"] == "needs_review"
+
+    lease = claim(store, "Workspace recovery", ["workspace"])
+    assert lease["status"] == "active"
+    assigned(lease, lambda: pc.write_text("recovered.txt", "workspace usable"))
+    assert (pc.workspace / "recovered.txt").read_text() == "workspace usable"
+
+
+def test_active_ui_reservation_still_serialises_desktop_work(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    claim(store, "Desktop owner", ["ui"])
+    target = store.task("create", title="Second desktop request")
+    with pytest.raises(CoordinationError) as error:
+        store.task("claim", task_id=target["id"], agent="Second", resources=["ui"], wait=False)
+    assert error.value.code == "TASK_CONFLICT"
+
+
+def test_expired_workspace_reservation_still_blocks_file_writes(pc):
+    """Fail-closed behaviour is preserved for uncertain workspace work."""
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    claim(store, "Uncertain workspace work", ["workspace"])
+    now[0] += 121
+    target = store.task("create", title="File write during uncertainty")
+    with pytest.raises(CoordinationError) as error:
+        store.task("claim", task_id=target["id"], agent="Writer", resources=["file:note.txt"], wait=False)
+    assert error.value.code == "TASK_CONFLICT"
+
+
+def test_stale_reviews_do_not_consume_active_assignment_slots(pc):
+    """Uncertain tasks are fenced by overlap, not by the live-assignment cap.
+
+    ``MAX_ACTIVE_ASSIGNMENTS`` bounds concurrent live work. A task awaiting
+    review owns no process, so it must not occupy a slot forever; otherwise
+    eight abandoned reservations would make the machine permanently unusable
+    even for files nobody touched.
+    """
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    for index in range(8):
+        lease = claim(store, f"Abandoned file work {index}", [f"file:stale{index}.txt"])
+        assert lease["status"] == "active"
+    now[0] += 121
+    fresh = store.task("create", title="Fresh disjoint file work")
+    lease = store.task("claim", task_id=fresh["id"], agent="Writer",
+                       resources=["file:fresh.txt"], wait=False)
+    assert lease["status"] == "active"

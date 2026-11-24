@@ -41,12 +41,36 @@ def resource(value):
     return 'file:' + (path.casefold() if os.name == 'nt' else path)
 
 
-def overlaps(left, right):
-    if 'workspace' in {left, right}:
+def overlaps(reserved, requested, *, uncertain=False):
+    """Return True when ``requested`` conflicts with ``reserved``.
+
+    ``uncertain`` marks a reservation whose owner stopped renewing its lease.
+    Such a task can no longer start new effects, so its fence narrows to the
+    capability it actually held. A ``ui`` task never covers file targets (see
+    :func:`covers`), so an abandoned desktop or browser session must not freeze
+    file tools while it waits for review.
+    """
+    if reserved == requested:
         return True
-    if left == 'ui' or right == 'ui':
-        return left == right
-    return left == right or left.startswith(right + '/') or right.startswith(left + '/')
+    if reserved == 'ui':
+        return requested == 'ui' if uncertain else True
+    if 'workspace' in {reserved, requested}:
+        return True
+    return requested.startswith(reserved + '/') or reserved.startswith(requested + '/')
+
+
+def fences(item, requested):
+    """Return True when a task or operation record blocks ``requested``.
+
+    ``item`` is a task record (``status``) or an operation record (``state``).
+    Uncertain owners fence only what they were authorised to touch.
+    """
+    resources = item.get('resources')
+    if not isinstance(resources, list) or not resources:
+        return False
+    uncertain = item.get('status') == 'needs_review' or item.get('state') == 'needs_review'
+    return any(overlaps(held, target, uncertain=uncertain)
+               for held in resources for target in requested)
 
 
 def covers(reservation, target):
@@ -497,7 +521,7 @@ class Coordination:
                 task_id = current[0]
             for task in data['tasks'].values():
                 if task['status'] in {'active', 'needs_review'} and task['id'] != task_id:
-                    if any(overlaps(a, b) for a in task['resources'] for b in targets):
+                    if fences(task, targets):
                         raise CoordinationError('TASK_CONFLICT', 'Another task reserved this detached command resource.')
             operations = data.setdefault('operations', {})
             if len(operations) >= MAX_OPERATION_RECORDS:
@@ -594,6 +618,11 @@ class Coordination:
             return False
         tasks=data['tasks'].values()
         held=[t for t in tasks if t['status'] in {'active','needs_review'}]
+        # Uncertain tasks still fence their own resources through the overlap
+        # check below, but they hold no live process, so they must not consume
+        # a live-assignment slot. Otherwise eight stale reviews would stop the
+        # machine from ever starting new work.
+        active=sum(1 for t in held if t['status']=='active')
         operation_reservations = []
         for operation in data.get('operations', {}).values():
             if not isinstance(operation, dict):
@@ -607,15 +636,17 @@ class Coordination:
                                      for item in resources))
                 except (TypeError, ValueError):
                     valid = False
-                operation_reservations.append({'resources': resources if valid else ['workspace']})
+                operation_reservations.append({'resources': resources if valid else ['workspace'],
+                                               'state': operation.get('state')})
         blocked=[]
         changed=False
         for task in sorted((t for t in tasks if t['status']=='waiting'),key=lambda t:t['queue_order']):
-            if len(held)>=MAX_ACTIVE_ASSIGNMENTS or any(overlaps(a,b) for other in held+operation_reservations+blocked for a in other['resources'] for b in task['resources']):
+            if active>=MAX_ACTIVE_ASSIGNMENTS or any(fences(other, task['resources']) for other in held+operation_reservations+blocked):
                 blocked.append(task)
                 continue
             task.update(status='active',expires_at=self.clock()+120)
             held.append(task)
+            active+=1
             changed=True
         return changed
 
@@ -871,7 +902,7 @@ class Coordination:
                 for task in data['tasks'].values():
                     if task is own or task['status'] not in {'active', 'needs_review'}:
                         continue
-                    if any(overlaps(a, b) for a in task['resources'] for b in targets):
+                    if fences(task, targets):
                         raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
                 for existing_id, existing in data.get('operations', {}).items():
                     if not isinstance(existing, dict):
@@ -893,7 +924,7 @@ class Coordination:
                         valid = False
                     if not valid:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
-                    if any(overlaps(a, b) for a in existing_resources for b in targets):
+                    if fences({'resources': existing_resources, 'state': existing.get('state')}, targets):
                         if existing.get('kind') == 'browser_workflow' and existing.get('state') == 'needs_review':
                             raise CoordinationError('TASK_CONFLICT', 'A prior run has an uncertain browser outcome. Inspect the page and workflow receipt before starting another run.')
                         raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying; do not replay automatically.')
