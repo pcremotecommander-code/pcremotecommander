@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from functools import wraps
 import inspect
 import json
+import math
 import os
 import secrets
 import threading
@@ -64,9 +65,69 @@ class Coordination:
             blob = self.store.tree.read('tasks.enc', 2 * 1024 * 1024)
         except FileNotFoundError:
             return {'tasks': {}, 'workflows': {}, 'runs': {}, 'operations': {}}
-        data = json.loads(AESGCM(self.store.key).decrypt(blob[:12], blob[12:], self.store.context))
-        data.setdefault('operations', {})
+        try:
+            data = json.loads(AESGCM(self.store.key).decrypt(blob[:12], blob[12:], self.store.context))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise CoordinationError(
+                'TASK_STATE_INVALID',
+                'Private coordination state is unreadable or malformed. Inspect it locally; no reservations were released.',
+            ) from exc
+        self._validate_state(data)
         return data
+
+    @staticmethod
+    def _validate_state(data):
+        """Reject malformed persisted structures before task or recovery logic uses them."""
+        if not isinstance(data, dict):
+            raise CoordinationError('TASK_STATE_INVALID', 'Private coordination state must be an object.')
+        for name in ('tasks', 'workflows', 'runs'):
+            if not isinstance(data.get(name), dict):
+                raise CoordinationError(
+                    'TASK_STATE_INVALID',
+                    f'Private coordination state has an invalid {name} container.',
+                )
+        if 'operations' not in data:
+            data['operations'] = {}
+        if not isinstance(data['operations'], dict):
+            raise CoordinationError(
+                'TASK_STATE_INVALID',
+                'Private coordination state has an invalid operations container.',
+            )
+
+        valid_statuses = {'queued', 'waiting', 'active', 'needs_review', 'completed', 'failed'}
+        for identifier, task in data['tasks'].items():
+            if (
+                not isinstance(identifier, str)
+                or not isinstance(task, dict)
+                or task.get('id') != identifier
+                or task.get('status') not in valid_statuses
+                or not isinstance(task.get('resources'), list)
+                or any(not isinstance(item, str) or not item for item in task['resources'])
+            ):
+                raise CoordinationError(
+                    'TASK_STATE_INVALID',
+                    'A task record in private coordination state is malformed. Inspect it locally; no reservations were released.',
+                )
+            if task['status'] in {'waiting', 'active', 'needs_review'}:
+                expires_at = task.get('expires_at')
+                if (
+                    isinstance(expires_at, bool)
+                    or not isinstance(expires_at, (int, float))
+                    or not math.isfinite(expires_at)
+                    or not task['resources']
+                ):
+                    raise CoordinationError(
+                        'TASK_STATE_INVALID',
+                        'An assigned task has invalid expiry or resource metadata. Inspect it locally; no reservations were released.',
+                    )
+            if task['status'] in {'waiting', 'active'} and (
+                not isinstance(task.get('lease_token'), str)
+                or not task['lease_token']
+            ):
+                raise CoordinationError(
+                    'TASK_STATE_INVALID',
+                    'An assigned task has an invalid lease token. Inspect it locally; no reservations were released.',
+                )
 
     def save(self, data):
         raw = json.dumps(data, ensure_ascii=True).encode()
@@ -443,6 +504,7 @@ class Coordination:
             return None
 
     def expire(self, data):
+        self._validate_state(data)
         changed = False
         for task in data['tasks'].values():
             if task['status'] == 'active' and task['expires_at'] <= self.clock():
