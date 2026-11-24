@@ -2451,3 +2451,26 @@ def test_stale_reviews_do_not_consume_active_assignment_slots(pc):
     lease = store.task("claim", task_id=fresh["id"], agent="Writer",
                        resources=["file:fresh.txt"], wait=False)
     assert lease["status"] == "active"
+
+
+def test_active_owner_renews_lease_with_each_guarded_operation(pc):
+    """Thinking time between calls must not expire an assignment in active use.
+
+    A lease expires after 120 seconds so an abandoned owner cannot hold the
+    workspace. An owner that keeps issuing coordinated operations is provably
+    alive, so each operation extends the lease; only a real pause longer than
+    that window is treated as abandonment.
+    """
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    setattr(pc, "_coordination", store)
+    lease = claim(store, "Long read-only audit", ["workspace"])
+
+    now[0] += 100
+    assigned(lease, lambda: pc.write_text("first.txt", "one"))
+    now[0] += 100
+    assigned(lease, lambda: pc.write_text("second.txt", "two"))
+
+    listed = {item["id"]: item for item in store.task("list")["tasks"]}
+    assert listed[lease["id"]]["status"] == "active"
+    assert (pc.workspace / "second.txt").read_text() == "two"

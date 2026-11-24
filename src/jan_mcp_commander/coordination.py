@@ -895,6 +895,13 @@ class Coordination:
                     if own is None:
                         raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
                     self.validate(own, current[1])
+                    # An owner that is issuing coordinated operations is
+                    # demonstrably alive. Extend the lease here so ordinary
+                    # thinking time between calls cannot expire an assignment
+                    # that is still in use. An owner that stops calling is not
+                    # renewed, expires after the same window, and then requires
+                    # review exactly as before.
+                    own['expires_at'] = self.clock() + 120
                     if not defer_task_scope and any(
                         not any(covers(r, target) for r in own['resources']) for target in targets
                     ):
