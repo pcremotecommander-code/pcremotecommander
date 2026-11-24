@@ -117,3 +117,95 @@ def test_oversized_persisted_expiry_returns_safe_state_error(store):
 
     with pytest.raises(CoordinationError, match="expiry"):
         store.load()
+
+
+def valid_run():
+    return {
+        "id": "run-1",
+        "task_id": "task-1",
+        "workflow": {
+            "id": "workflow-1",
+            "title": "Synthetic workflow",
+            "steps": [
+                {"action": "open", "target": "http://example.test/"},
+                {"action": "click", "target": "#done", "before_url": "http://example.test/"},
+            ],
+            "status": "published",
+            "expected_url": "http://example.test/",
+            "expected_text": "Done",
+            "version": 1,
+        },
+        "next_step": 0,
+        "status": "ready",
+    }
+
+
+@pytest.mark.parametrize("status", ["succeeded", "complete", "running", ""])
+def test_unsupported_run_status_returns_safe_state_error(store, status):
+    run = valid_run()
+    run["status"] = status
+    store.save({
+        "tasks": {}, "workflows": {}, "runs": {"run-1": run}, "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="run"):
+        store.load()
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        None,
+        {},
+        {"id": "workflow-1", "title": "Synthetic", "steps": []},
+        {
+            "id": "workflow-1", "title": "Synthetic",
+            "steps": [{"action": "execute", "target": "#done"}],
+            "status": "published", "expected_url": "http://example.test/",
+            "expected_text": "Done", "version": 1,
+        },
+        {
+            "id": "workflow-1", "title": "Synthetic",
+            "steps": [{"action": "click"} , {"action": "click", "target": "#done", "before_url": "http://example.test/"}],
+            "status": "published", "expected_url": "http://example.test/",
+            "expected_text": "Done", "version": 1,
+        },
+    ],
+)
+def test_malformed_run_workflow_snapshot_returns_safe_state_error(store, workflow):
+    run = valid_run()
+    run["workflow"] = workflow
+    store.save({
+        "tasks": {}, "workflows": {}, "runs": {"run-1": run}, "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="run"):
+        store.load()
+
+
+@pytest.mark.parametrize("next_step", [True, -1, 2, 1.5, "1"])
+def test_invalid_run_step_position_returns_safe_state_error(store, next_step):
+    run = valid_run()
+    run["next_step"] = next_step
+    store.save({
+        "tasks": {}, "workflows": {}, "runs": {"run-1": run}, "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="run"):
+        store.load()
+
+
+def test_valid_run_lifecycle_states_and_terminal_step_position_load(store):
+    run = valid_run()
+    store.save({
+        "tasks": {}, "workflows": {}, "runs": {"run-1": run}, "operations": {},
+    })
+    assert store.load()["runs"]["run-1"]["status"] == "ready"
+
+    for status in ("unknown", "passed", "failed", "abandoned_after_review"):
+        run["status"] = status
+        run["next_step"] = 2 if status in {"passed", "failed"} else 1
+        store.save({
+            "tasks": {}, "workflows": {}, "runs": {"run-1": run}, "operations": {},
+        })
+        assert store.load()["runs"]["run-1"]["status"] == status
