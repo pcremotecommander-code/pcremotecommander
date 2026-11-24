@@ -451,3 +451,33 @@ def test_expired_task_lease_during_document_apply_is_safe_prewrite_failure(comma
     assert receipt['status']=='partial_failure'
     assert receipt['jobs'][0]['status']=='failed'
     assert not (commander.workspace/'revised.docx').exists()
+
+def test_document_review_cannot_cross_task_lease_reassignment(commander):
+    from jan_mcp_commander.coordination import CoordinationError, assignment, coordinator
+
+    data=docx();(commander.workspace/'source.docx').write_bytes(data)
+    store=coordinator(commander)
+    task=store.task('create',title='Lease-bound document review')
+    first=store.task('claim',task_id=task['id'],agent='first reviewer',
+                     resources=['file:source.docx','file:revised.docx'])
+
+    marker=assignment.set((first['id'],first['lease_token']))
+    try:
+        review=review_jobs(commander,[editing(data)])
+    finally:
+        assignment.reset(marker)
+
+    # A clean handoff releases the first lease and permits a new claimant,
+    # but the old review must not silently transfer to that new lease.
+    store.task('finish',task_id=first['id'],lease_token=first['lease_token'],
+               status='queued')
+    second=store.task('claim',task_id=first['id'],agent='second reviewer',
+                      resources=['file:source.docx','file:revised.docx'])
+    assert second['revision'] > first['revision']
+
+    with pytest.raises(CoordinationError,match='earlier task lease'):
+        assigned(second,lambda:commander.get_document_workflow(review['plan_id']))
+    with pytest.raises(CoordinationError,match='earlier task lease'):
+        assigned(second,lambda:commander.apply_document_workflow(
+            review['plan_id'],review['review_sha256'],review['jobs']))
+    assert not (commander.workspace/'revised.docx').exists()
