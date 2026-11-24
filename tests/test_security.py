@@ -310,3 +310,36 @@ def test_private_store_resource_lock_handoff_survives_supervisor_exit(cmd):
         if child.poll() is None:
             child.kill()
             child.wait(timeout=2)
+
+def test_private_store_local_resource_mutex_registry_releases_idle_entries(cmd):
+    store=cmd._store
+    baseline=set(store.resource_mutexes)
+
+    for index in range(40):
+        resource_id=f'file:ephemeral-{index}.txt'
+        with store.resource_locked(resource_id):
+            pass
+    assert set(store.resource_mutexes)==baseline
+
+    for index in range(40):
+        resource_id=f'file:probe-{index}.txt'
+        with store.try_resource_locked(resource_id) as acquired:
+            assert acquired is True
+    assert set(store.resource_mutexes)==baseline
+
+
+def test_private_store_handoff_mutex_is_retained_for_inherited_lock(cmd):
+    store=cmd._store
+    resource_id='session:stable-handoff-mutex'
+    baseline=set(store.resource_mutexes)
+
+    with store.resource_locked_handoff(resource_id):
+        pass
+    lock_name='resource-'+__import__('hashlib').sha256(resource_id.encode()).hexdigest()+'.lock'
+    assert set(store.resource_mutexes)==baseline|{lock_name}
+
+    # A normal acquisition reuses the retained mutex rather than replacing it.
+    retained=store.resource_mutexes[lock_name]
+    with store.resource_locked(resource_id):
+        assert store.resource_mutexes[lock_name] is retained
+    assert store.resource_mutexes[lock_name] is retained
