@@ -1184,7 +1184,10 @@ class ControlCommander(PortableCommander):
     def desktop_action(self, action, x=0, y=0, text='', keys=None, amount=0, end_x=0, end_y=0, frame_id=''):
         self._check('desktop')
         from .privacy import assert_public_text
-        assert_public_text(text)
+        try:
+            assert_public_text(text)
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
         if sys.platform.startswith('linux') and (os.environ.get('XDG_SESSION_TYPE') != 'x11' or not os.environ.get('DISPLAY')):
             raise PermissionDenied('Linux desktop input requires an X11 session. Wayland input is unavailable.')
         if action not in {'screenshot', 'click', 'right_click', 'double_click', 'drag', 'move', 'scroll', 'type', 'hotkey'}:
@@ -1211,9 +1214,9 @@ class ControlCommander(PortableCommander):
             ui.PAUSE = 0.15
             width, height = ui.size()
             if action in {'click', 'right_click', 'double_click', 'drag', 'move', 'scroll'} and not (0 <= x < width and 0 <= y < height):
-                raise PermissionDenied('Coordinates must be inside the primary screen')
+                raise OperationNotApplied('Coordinates must be inside the primary screen')
             if action == 'drag' and (type(end_x) is not int or type(end_y) is not int or not (0 <= end_x < width and 0 <= end_y < height)):
-                raise PermissionDenied('Drag endpoint must be inside the primary screen')
+                raise OperationNotApplied('Drag endpoint must be inside the primary screen')
             if action == 'screenshot':
                 foreground = self._foreground_window()
                 focus = None
@@ -1231,7 +1234,7 @@ class ControlCommander(PortableCommander):
             frame = self._desktop_frame
             if (not isinstance(frame_id,str) or frame is None or frame_id!=frame[0] or
                 time.monotonic()-frame[1]>30 or frame[2]!=(width,height) or frame[3]!=self._foreground_window()):
-                raise PermissionDenied('Desktop frame missing, stale, consumed or foreground changed')
+                raise OperationNotApplied('Desktop frame missing, stale, consumed or foreground changed')
             # Consume before input: a transport retry cannot silently repeat a mutation.
             self._desktop_frame = None
             if action == 'click': ui.click(x, y)
