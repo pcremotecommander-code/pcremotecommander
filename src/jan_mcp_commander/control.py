@@ -124,8 +124,9 @@ class ControlCommander(PortableCommander):
         except ValueError as exc:
             raise OperationNotApplied(str(exc)) from exc
 
-    @coordinated('workspace')
     def get_document_workflow(self, plan_id):
+        # Receipt polling reads only the private document-plan store. It must
+        # remain available while the worker holds source/output reservations.
         self._check('files')
         return self._documents().get(plan_id)
 
@@ -719,11 +720,13 @@ class ControlCommander(PortableCommander):
                                         group_alive = True
                                 if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
-                                        # A nonzero exit may follow partial external
-                                        # effects; require explicit review rather than
-                                        # treating it as a clean completion.
+                                        # A naturally exited command is complete even
+                                        # when its exit code is nonzero. The supervisor
+                                        # returns 125 when descendant cleanup was required
+                                        # or supervision ended abnormally; those outcomes
+                                        # remain review-required.
                                         operation_id, success=(not getattr(supervisor, 'pcrc_terminated', False)
-                                                    and supervisor.returncode == 0),
+                                                    and supervisor.returncode != 125),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     supervisor.pcrc_finalized = True
