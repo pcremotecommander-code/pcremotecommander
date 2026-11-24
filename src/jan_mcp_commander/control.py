@@ -304,13 +304,19 @@ class ControlCommander(PortableCommander):
     def read_text(self, path):
         """Read workspace text only when the files capability is enabled."""
         self._check('files')
-        return super().read_text(path)
+        try:
+            return super().read_text(path)
+        except PermissionDenied as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files', 'path')
     def file_info(self, path):
         """Inspect workspace file metadata only with the files capability."""
         self._check('files')
-        return super().file_info(path)
+        try:
+            return super().file_info(path)
+        except PermissionDenied as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files', 'path')
     def find_files(self, term, max_results=50, path='.'):
@@ -428,7 +434,10 @@ class ControlCommander(PortableCommander):
         if not isinstance(term, str) or not term or len(term) > 200 or type(max_results) is not int or not 1 <= max_results <= 100:
             raise PermissionDenied('Invalid literal search')
         from .privacy import assert_public_text
-        assert_public_text(term)
+        try:
+            assert_public_text(term)
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
         self._audit('search_text', True, 'literal search; contents omitted')
         pending, matches, scanned = ['.'], [], 0
         deadline = time.monotonic()+2
@@ -1112,10 +1121,10 @@ class ControlCommander(PortableCommander):
             self._desktop_frame=None
             if (current is None or not isinstance(inspection_id,str) or inspection_id!=current[0] or
                 time.monotonic()-current[1]>30 or current[2]!=self._foreground_window()):
-                raise UIAutomationError('UIA_INSPECTION_REQUIRED','Inspection missing, expired, consumed, or foreground changed; inspect again.')
+                raise OperationNotApplied(UIAutomationError('UIA_INSPECTION_REQUIRED','Inspection missing, expired, consumed, or foreground changed; inspect again.'))
             target=current[4].get(control_id) if isinstance(control_id,str) else None
             if target is None or action not in target['actions'] or not target['enabled']:
-                raise UIAutomationError('UIA_TARGET_CHANGED','Choose an enabled supported control_id from a fresh inspection; names are not selectors.')
+                raise OperationNotApplied(UIAutomationError('UIA_TARGET_CHANGED','Choose an enabled supported control_id from a fresh inspection; names are not selectors.'))
             result=query({'handle':current[2],'window_stamp':current[3],'runtime_id':target['runtime_id'],
                           'stamp':target['stamp'],'action':action,'text':text},lambda:self._require_capability('desktop'))
             self._require_capability('desktop')
