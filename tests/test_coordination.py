@@ -882,13 +882,16 @@ def test_synchronous_command_keeps_outer_workspace_operation_scope(pc, monkeypat
     monkeypatch.setattr(pc, 'session_output', lambda session_id: {'exit_code': 0})
     monkeypatch.setattr(pc, 'stop_session', lambda session_id: {'stopped': session_id})
 
-    result = pc.run_command('true')
-    assert result['exit_code'] == 0
-    assert observed['scope'] == ('workspace',)
-    with store.store.locked():
-        records = [r for r in store.load()['operations'].values()
-                   if r.get('resources') == ['workspace']]
-    assert records[-1]['state'] == 'completed'
+    try:
+        result = pc.run_command('true')
+        assert result['exit_code'] == 0
+        assert observed['scope'] == ('workspace',)
+        with store.store.locked():
+            records = [r for r in store.load()['operations'].values()
+                       if r.get('resources') == ['workspace']]
+        assert records[-1]['state'] == 'completed'
+    finally:
+        pc._sessions.pop('fake-session', None)
 
 
 def test_browser_teaching_runs_inside_ui_operation_scope(pc, monkeypatch):
