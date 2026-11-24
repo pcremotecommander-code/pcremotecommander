@@ -94,6 +94,20 @@ class Coordination:
                 'Private coordination state has an invalid operations container.',
             )
 
+        for identifier, run in data['runs'].items():
+            if (
+                not isinstance(identifier, str)
+                or not isinstance(run, dict)
+                or not isinstance(run.get('task_id'), str)
+                or not run.get('task_id')
+                or not isinstance(run.get('status'), str)
+                or not run.get('status')
+            ):
+                raise CoordinationError(
+                    'TASK_STATE_INVALID',
+                    'A run record in private coordination state is malformed. Inspect it locally; no reservations were released.',
+                )
+
         valid_statuses = {'queued', 'waiting', 'active', 'needs_review', 'completed', 'failed'}
         for identifier, task in data['tasks'].items():
             if (
@@ -111,10 +125,14 @@ class Coordination:
                 )
             if task['status'] in {'waiting', 'active', 'needs_review'}:
                 expires_at = task.get('expires_at')
+                try:
+                    finite_expiry = math.isfinite(expires_at)
+                except (OverflowError, TypeError):
+                    finite_expiry = False
                 if (
                     isinstance(expires_at, bool)
                     or not isinstance(expires_at, (int, float))
-                    or not math.isfinite(expires_at)
+                    or not finite_expiry
                     or not task['resources']
                 ):
                     raise CoordinationError(
