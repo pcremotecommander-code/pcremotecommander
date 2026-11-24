@@ -485,3 +485,19 @@ def test_document_review_cannot_cross_task_lease_reassignment(commander):
     finally:
         assignment.reset(marker)
     assert not (commander.workspace/'revised.docx').exists()
+
+def test_prewrite_writer_rejection_is_not_reported_as_unknown(commander,monkeypatch):
+    from jan_mcp_commander.core import OperationNotAppliedFileExists
+
+    data=docx();(commander.workspace/'source.docx').write_bytes(data)
+    review=review_jobs(commander,[editing(data)])
+    def rejected_before_write(*args,**kwargs):
+        raise OperationNotAppliedFileExists('Destination appeared before write; no output was changed')
+    monkeypatch.setattr(commander,'_write_binary',rejected_before_write)
+
+    receipt=apply_review(commander,review['plan_id'],review['review_sha256'],review['jobs'])
+    assert receipt['status']=='partial_failure'
+    assert receipt['jobs'][0]['status']=='failed'
+    assert receipt['jobs'][0]['outcome_unknown'] is False
+    assert receipt['jobs'][0]['automatic_retry'] is False
+    assert not (commander.workspace/'revised.docx').exists()
