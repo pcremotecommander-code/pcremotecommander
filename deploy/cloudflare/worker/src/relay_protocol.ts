@@ -1,4 +1,4 @@
-export const CONTROL_CATALOG_READ_TOOLS = new Set(['inspect_development','get_development_change','inspect_document_pdf','preview_document_workflow','get_document_workflow','read_pdf', 'inspect_media', 'transcribe_audio', 'list_processes', 'list_applications','inspect_office_document','preview_spreadsheet_edit','preview_file_edit','read_multiple_files','list_workspace_entries','search_workspace','read_file_excerpt','list_browser_tabs','inspect_browser_page','capture_browser','inspect_desktop_controls']);
+export const CONTROL_CATALOG_READ_TOOLS = new Set(['inspect_development','get_development_change','inspect_document_pdf','preview_document_workflow','get_document_workflow','read_pdf', 'inspect_media', 'transcribe_audio', 'list_processes', 'list_applications','inspect_office_document','preview_spreadsheet_edit','preview_file_edit']);
 /** JAN outbound relay: strict message contracts (no transport side-effects). */
 export const RELAY_MAX_REQUEST=262144;
 export const RELAY_MAX_RESPONSE=1048576;
