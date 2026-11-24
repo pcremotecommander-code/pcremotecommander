@@ -262,7 +262,10 @@ def test_review_covers_image_and_destination_changes(commander):
         apply_review(commander,p['plan_id'],p['review_sha256'],[])
     (commander.workspace/'revised.docx').write_bytes(docx('Other ','file'))
     result=apply_review(commander,p['plan_id'],p['review_sha256'],p['jobs'])
-    assert result['jobs'][0]['status']=='unknown' and not result['jobs'][0]['automatic_retry']
+    assert result['jobs'][0]['status']=='failed'
+    assert result['jobs'][0]['outcome_unknown'] is False
+    assert not result['jobs'][0]['automatic_retry']
+    assert not (commander.workspace/'revised.docx').exists()]
 
 
 def test_complex_tables_and_inline_images_fail_explicitly():
