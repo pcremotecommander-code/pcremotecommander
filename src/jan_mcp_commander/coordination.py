@@ -562,7 +562,7 @@ class Coordination:
         return any(entry.get('task_id') == task_id and not entry['done'].is_set() for entry in self.commander._sessions.values())
 
     @contextmanager
-    def guard(self, resources, *, allow_active_sessions=False):
+    def guard(self, resources, *, allow_active_sessions=False, defer_task_scope=False):
         targets = sorted(set(resource(item) for item in resources))
         outer_resources = self.depth.get()
         if outer_resources is not None:
@@ -570,7 +570,7 @@ class Coordination:
             # nested calls. The outer reservation is an additional boundary,
             # not a substitute for the assigned task's narrower permissions.
             current = assignment.get()
-            if current:
+            if current and not defer_task_scope:
                 with self.store.locked():
                     data = self.load()
                     self.expire(data)
@@ -609,7 +609,9 @@ class Coordination:
                     if own is None:
                         raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
                     self.validate(own, current[1])
-                    if any(not any(covers(r, target) for r in own['resources']) for target in targets):
+                    if not defer_task_scope and any(
+                        not any(covers(r, target) for r in own['resources']) for target in targets
+                    ):
                         raise CoordinationError('TASK_SCOPE_DENIED', 'This operation exceeds the assignment. Finish and claim an appropriate reservation before continuing.')
                 for task in data['tasks'].values():
                     if task is own or task['status'] not in {'active', 'needs_review'}:
@@ -744,7 +746,13 @@ def coordinated(kind, *paths):
             bound = signature.bind(self, *args, **kwargs)
             bound.apply_defaults()
             targets = [resource('file:' + bound.arguments[p]) for p in paths] if paths else [kind]
-            with coordinator(self).guard(targets, allow_active_sessions=method.__name__ == 'process_input'):
+            with coordinator(self).guard(
+                targets,
+                allow_active_sessions=method.__name__ == 'process_input',
+                # Document preview only schedules work. The worker rechecks
+                # each source/output path under its own reservation before IO.
+                defer_task_scope=method.__name__ == 'preview_document_workflow',
+            ):
                 result = method(self, *args, **kwargs)
                 if assignment.get() and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
                     entry = self._sessions.get(result.get('session_id'))
