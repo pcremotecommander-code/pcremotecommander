@@ -116,7 +116,13 @@ class ControlCommander(PortableCommander):
         self._check('files')
         self._require_binary_write()
         self._audit('document_apply', True, plan_id)
-        return self._documents().apply(plan_id, review_sha256, review)
+        try:
+            # apply() validates the exact review and reserves worker capacity
+            # before dispatch. A ValueError here is a safe pre-dispatch reject;
+            # document writes happen asynchronously only after it returns.
+            return self._documents().apply(plan_id, review_sha256, review)
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('workspace')
     def get_document_workflow(self, plan_id):
