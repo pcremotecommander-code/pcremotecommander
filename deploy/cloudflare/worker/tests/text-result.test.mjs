@@ -14,7 +14,7 @@ test('text-only clients receive account, pairing and live diagnostic details aft
   return Response.json({type:'response',request_id:envelope.request_id,status:200,payload:JSON.stringify({jsonrpc:'2.0',id:call.id,result:{content:[{type:'text',text:'Diagnostic label'}],structuredContent:{ok:true,summary:'Diagnostic label',data:sensitive?{text:'password=synthetic-blocked-value'}:{version:'synthetic-version',stdout:'synthetic-output',entries:['synthetic.txt']}}}})});
  }})}};
  const call=async name=>{
-  const response=await proxyMcp(new Request(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{}}})}),env,{audience:origin+'/mcp',userId:'5678',scope:['pcrc:read']},{accountId:'5678'});
+  const response=await proxyMcp(new Request(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{}}})}),env,{audience:origin+'/mcp',userId:'1234',scope:['pcrc:read']},{accountId:'1234'});
   assert.equal(response.status,200);return (await response.json()).result;
  };
  for(const name of ['who_am_i','diagnose_connection','get_connection_status','run_diagnostic','list_workspace_entries']){
