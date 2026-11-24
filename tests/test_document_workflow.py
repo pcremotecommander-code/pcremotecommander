@@ -475,9 +475,13 @@ def test_document_review_cannot_cross_task_lease_reassignment(commander):
                       resources=['file:source.docx','file:revised.docx'])
     assert second['revision'] > first['revision']
 
-    with pytest.raises(CoordinationError,match='earlier task lease'):
-        assigned(second,lambda:commander.get_document_workflow(review['plan_id']))
-    with pytest.raises(CoordinationError,match='earlier task lease'):
-        assigned(second,lambda:commander.apply_document_workflow(
-            review['plan_id'],review['review_sha256'],review['jobs']))
+    marker=assignment.set((second['id'],second['lease_token']))
+    try:
+        with pytest.raises(CoordinationError,match='earlier task lease'):
+            commander.get_document_workflow(review['plan_id'])
+        with pytest.raises(CoordinationError,match='earlier task lease'):
+            commander.apply_document_workflow(
+                review['plan_id'],review['review_sha256'],review['jobs'])
+    finally:
+        assignment.reset(marker)
     assert not (commander.workspace/'revised.docx').exists()
