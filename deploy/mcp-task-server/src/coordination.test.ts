@@ -64,3 +64,48 @@ test('four MCP clients share real assignments and queue overlapping claims witho
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('list_tasks preserves sanitized unresolved operation diagnostics across the MCP boundary', async () => {
+  const operationId = 'a'.repeat(32);
+  const service = {
+    call: async (name: string) => {
+      assert.equal(name, 'jan_task_state');
+      return {
+        tasks: [],
+        truncated: false,
+        operations: [{
+          operation_id: operationId,
+          state: 'needs_review',
+          kind: 'write_text',
+          task_id: null,
+          resource_scopes: ['workspace'],
+          note: 'Synthetic recovery fixture',
+        }],
+      };
+    },
+  };
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  const server = createTaskServer(service, { control: true, capabilities: new Set(['files']) });
+  const client = new Client({ name: 'operation-diagnostics-regression', version: '1' });
+  try {
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    const result = await client.callTool({ name: 'list_tasks', arguments: {} });
+    assert.equal(result.isError, undefined, JSON.stringify(result));
+    const structured = result.structuredContent as { data: Record<string, unknown> };
+    assert.deepEqual(structured.data.operations, [{
+      operation_id: operationId,
+      state: 'needs_review',
+      kind: 'write_text',
+      task_id: null,
+      resource_scopes: ['workspace'],
+      note: 'Synthetic recovery fixture',
+    }]);
+    const rendered = result.content.find((part) => part.type === 'text');
+    assert.ok(rendered && rendered.type === 'text');
+    assert.deepEqual(JSON.parse(rendered.text), structured);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
