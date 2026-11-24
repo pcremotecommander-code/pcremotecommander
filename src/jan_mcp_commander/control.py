@@ -1201,7 +1201,7 @@ class ControlCommander(PortableCommander):
         self._check('desktop')
         if type(fallback_to_screenshot) is not bool:
             raise OperationNotApplied('Screenshot fallback must be boolean')
-        from .windows_uia import FILE_DIALOG_MESSAGE, query, public_control, UIAutomationError
+        from .windows_uia import FILE_DIALOG_MESSAGE, query, public_control, UIAutomationError, UIAutomationPreconditionError
         with self._ui_lock:
             self._uia_inspection=None
             self._desktop_frame=None
@@ -1237,7 +1237,7 @@ class ControlCommander(PortableCommander):
                         'fallback':'If the intended control is absent, capture_desktop and review a fresh frame; never guess coordinates.'}
             except UIAutomationError as exc:
                 if exc.code not in {'UIA_UNAVAILABLE','UIA_FILE_DIALOG'}:
-                    raise OperationNotApplied(str(exc)) from exc
+                    raise UIAutomationPreconditionError(exc.code,str(exc)) from exc
                 if fallback_to_screenshot:
                     return {**self.desktop_action('screenshot'),'method':'screenshot','uia_status':'unavailable','uia_reason':str(exc)}
                 return {'method':'uia_unavailable','reason':str(exc),'window':public.get('window',{}),'visited':public.get('visited',0),'controls':[],'fallback_tool':'capture_desktop',
