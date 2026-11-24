@@ -2041,3 +2041,28 @@ def test_task_reconciliation_does_not_overwrite_a_concurrent_lease_renewal(pc, m
     assert task['expires_at'] == now[0] + 120
     assert task['resources'] == ['file:renew-race.txt']
     assert data['operations'][operation_id]['state'] == 'needs_review'
+
+
+def test_lease_cannot_be_renewed_at_or_after_expiry_boundary(pc):
+    now = [1000.0]
+    store = Coordination(pc, clock=lambda: now[0])
+    lease = claim(store, 'exact expiry boundary', ['file:expiry-boundary.txt'])
+    now[0] = lease['expires_at']
+
+    with pytest.raises(CoordinationError):
+        store.task('renew', task_id=lease['id'],
+                   lease_token=lease['lease_token'])
+
+    current = next(
+        task for task in store.task('list')['tasks']
+        if task['id'] == lease['id']
+    )
+    assert current['status'] == 'needs_review'
+    assert current['resources'] == ['file:expiry-boundary.txt']
+    assert current['lease_token'] == '' or 'lease_token' not in current
+
+    # An expired lease stays fenced even if the clock later moves forward.
+    now[0] += 1
+    with pytest.raises(CoordinationError):
+        store.task('renew', task_id=lease['id'],
+                   lease_token=lease['lease_token'])
