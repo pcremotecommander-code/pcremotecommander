@@ -95,7 +95,8 @@ export async function ownerConsole(request:Request,env:Env,owner:Owner|null,stor
   if(!security.verified)return new Response(null,{status:303,headers:{Location:config(env).publicOrigin+'/admin/security','Cache-Control':'no-store'}});
   let fields:URLSearchParams|null=null;
   try{if(request.method==='POST')fields=await form(request.clone(),env,owner);}catch{return failure(403,'Owner form denied');}
-  if(path==='/admin/security-backups'&&request.method==='GET'){
+  if(path==='/admin/security-backups'){
+    if(request.method!=='GET')return failure(405,'Method denied');
     if(url.search)return failure(400,'Unexpected dashboard parameters');
     const metric=(label:string,value:string,help:string)=>'<section class="panel owner-metric"><p class="metric-label">'+escaped(label)+'</p><strong>'+escaped(value)+'</strong><p class="footnote">'+escaped(help)+'</p></section>';
     const prototype='<p>The private backup-engine prototype has a scheduler, encrypted backup verification, remote-storage adapter and a read-only local owner dashboard. Its automated test workflow has passed.</p><p><a class="button neutral" href="https://github.com/pcremotecommander-code/pcrc-security-backup/tree/backup-engine-prototype" target="_blank" rel="noopener noreferrer">Open private backup project</a></p>';
