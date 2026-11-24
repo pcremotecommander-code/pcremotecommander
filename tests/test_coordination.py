@@ -1126,23 +1126,28 @@ def test_detached_command_reservation_survives_request_process_scope(pc):
         other.close_control()
 
 
-def test_supervisor_crash_keeps_child_lock_until_child_exits(pc):
+def test_supervisor_crash_keeps_child_lock_until_child_exits(pc, tmp_path):
     store = coordinator(pc)
-    result = pc.start_program(sys.executable, ['-c', 'import time; time.sleep(2)'],
-                              timeout_seconds=10)
+    release_file = tmp_path / 'release-supervised-child'
+    child = (
+        "import os,time; deadline=time.monotonic()+8; "
+        "exec(" + repr("while not os.path.exists(" + repr(str(release_file)) + ") and time.monotonic()<deadline: time.sleep(0.01)") + ")"
+    )
+    result = pc.start_program(sys.executable, ['-c', child], timeout_seconds=10)
     entry = pc._sessions[result['session_id']]
     with store.store.locked():
         data = store.load()
         record_id = next(key for key, value in data['operations'].items()
                          if value.get('kind') == 'detached_command'
                          and value.get('state') == 'active')
-    # Kill only the supervisor. On POSIX the child inherited the OS lock;
-    # on Windows the session finalizer uses the current process-tree cleanup path.
+    # Kill only the supervisor. The child remains blocked until explicitly
+    # released (POSIX) or the Windows Job Object cleanup terminates it.
     entry['process'].kill()
     entry['process'].wait(timeout=10)
     first_probe = store.recover_operations()
     if first_probe.get('busy'):
         assert record_id in first_probe['busy']
+    release_file.write_text('release')
     assert entry['done'].wait(10)
 
     store.recover_operations()
