@@ -265,7 +265,7 @@ def test_review_covers_image_and_destination_changes(commander):
     assert result['jobs'][0]['status']=='failed'
     assert result['jobs'][0]['outcome_unknown'] is False
     assert not result['jobs'][0]['automatic_retry']
-    assert not (commander.workspace/'revised.docx').exists()]
+    assert not (commander.workspace/'revised.docx').exists()
 
 
 def test_complex_tables_and_inline_images_fail_explicitly():
