@@ -2214,3 +2214,52 @@ def test_two_process_reconcilers_cannot_release_the_same_operation_twice(pc):
                 process.join(5)
         for receive in receivers:
             receive.close()
+
+
+def test_workspace_guard_rechecks_sessions_after_resource_lock_wait(pc, monkeypatch):
+    import threading
+
+    store = coordinator(pc)
+    initial_snapshot = threading.Event()
+    original_snapshot = store._session_snapshot
+    calls = [0]
+
+    def observed_snapshot():
+        calls[0] += 1
+        if calls[0] == 1:
+            initial_snapshot.set()
+        return original_snapshot()
+
+    monkeypatch.setattr(store, '_session_snapshot', observed_snapshot)
+    entered = threading.Event()
+    result = {}
+
+    def workspace_operation():
+        try:
+            with store.guard(['workspace']):
+                entered.set()
+            result['entered'] = True
+        except CoordinationError as exc:
+            result['error_code'] = exc.code
+
+    worker = threading.Thread(target=workspace_operation)
+    try:
+        with store.store.resource_locked('workspace'):
+            worker.start()
+            assert initial_snapshot.wait(5), 'workspace guard did not perform its initial session check'
+            # The worker has passed its first session check but is still
+            # waiting for this resource lock. Simulate a command session
+            # becoming visible before the worker acquires the lock.
+            pc._sessions['racing-command'] = {
+                'profile': 'operator_command',
+                'done': threading.Event(),
+            }
+        worker.join(5)
+        assert not worker.is_alive(), 'workspace guard did not release its lock waiter'
+        assert entered.is_set() is False
+        assert result.get('error_code') == 'TASK_CONFLICT'
+        assert calls[0] >= 2
+    finally:
+        pc._sessions.pop('racing-command', None)
+        if worker.is_alive():
+            worker.join(5)
