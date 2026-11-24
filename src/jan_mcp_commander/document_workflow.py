@@ -319,8 +319,16 @@ class DocumentWorkflow:
                 record.update(status='unknown' if uncertain else 'partial' if saved else 'failed',outputs=receipts,error=message,
                     outcome_unknown=uncertain,automatic_retry=False)
             except Exception:
-                receipts=[*saved,attempted] if attempted and not any(o['path']==attempted['path'] for o in saved) else saved
-                record.update(status='unknown',outputs=receipts,error='Outcome uncertain; inspect outputs, never replay',outcome_unknown=True,automatic_retry=False)
+                uncertain=attempted is not None
+                receipts=[*saved,attempted] if uncertain and not any(o['path']==attempted['path'] for o in saved) else saved
+                record.update(
+                    status='unknown' if uncertain else 'partial' if saved else 'failed',
+                    outputs=receipts,
+                    error=('Outcome uncertain; inspect outputs, never replay'
+                           if uncertain else 'Preparation or validation failed before a write was attempted'),
+                    outcome_unknown=uncertain,
+                    automatic_retry=False,
+                )
             with self.store.locked(): plans=self.load();plans[plan_id]=plan;self.save(plans)
         plan['status']='completed' if all(r['status']=='completed' for r in plan['jobs']) else 'partial_failure'
         with self.store.locked(): plans=self.load();plans[plan_id]=plan;self.save(plans)
