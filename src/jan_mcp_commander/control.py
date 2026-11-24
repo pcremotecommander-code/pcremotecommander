@@ -1378,13 +1378,34 @@ class ControlCommander(PortableCommander):
             return {'performed': action, 'screen_width': width, 'screen_height': height}
 
     def close_control(self):
-        if self._closed:
-            return
+        # Disable new work first, then terminate every session that was already
+        # owned by this commander. Use the base implementation to bypass
+        # task-owner filtering during shutdown; the specialized _terminate()
+        # still enforces supervisor/Job Object cleanup and reservation release.
         with self._lock:
+            already_closed = self._closed
             self._closed = True
             self._disabled = True
             self.allow_writes = False
-        if self._foreground_parent is not None:self._foreground_parent.close()
+            session_ids = list(self._sessions)
+
+        for session_id in session_ids:
+            try:
+                PortableCommander.stop_session(self, session_id)
+            except Exception:
+                # Do not hide a failed cleanup by deleting the session. The
+                # collector/finalizer keeps its receipt and locks fail closed.
+                entry = self._sessions.get(session_id)
+                if entry is not None:
+                    try:
+                        self._terminate(entry['process'])
+                    except Exception:
+                        pass
+
+        if already_closed:
+            return
+        if self._foreground_parent is not None:
+            self._foreground_parent.close()
         from .cli import Console
         Console(self).close()
         try:
