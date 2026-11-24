@@ -684,13 +684,18 @@ class Coordination:
         if (not allow_active_sessions
                 and any(target == 'workspace' or target.startswith('file:') for target in targets)):
             sessions = self._session_snapshot()
-            if sessions is None or any(
+            if sessions is None:
+                raise CoordinationError(
+                    'TASK_CONFLICT',
+                    'The session registry changed during inspection. Inspect or stop active sessions before retrying this workspace operation.',
+                )
+            if any(
                 entry.get('profile') == 'operator_command' and not entry['done'].is_set()
                 for entry in sessions
             ):
                 raise CoordinationError(
                     'TASK_CONFLICT',
-                    'An owned command may still be running with workspace access, or the session registry changed during inspection. Inspect or stop that session before retrying.',
+                    'An owned command is still running with workspace access. Inspect or stop that session before starting another workspace operation.',
                 )
         operation_id = uuid.uuid4().hex
         # Acquire resource locks before publishing the active record. A crash
