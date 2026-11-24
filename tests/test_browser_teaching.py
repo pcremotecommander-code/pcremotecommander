@@ -3,6 +3,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from threading import Event
 import pytest
 from jan_mcp_commander.control import ControlCommander
@@ -138,9 +139,13 @@ def test_concurrent_duplicate_run_step_executes_browser_action_once(demo, monkey
 
     monkeypatch.setattr(pc, '_browser_action', blocked)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
-        assert entered.wait(5)
-        second = pool.submit(pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
+        first_context = copy_context()
+        second_context = copy_context()
+        first = pool.submit(first_context.run, pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
+        if not entered.wait(5):
+            first.result(timeout=1)
+            pytest.fail('first workflow step did not reach the browser action')
+        second = pool.submit(second_context.run, pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
         release.set()
         assert first.result(timeout=10)['next_step'] == 1
         with pytest.raises(CoordinationError, match='already advanced'):
