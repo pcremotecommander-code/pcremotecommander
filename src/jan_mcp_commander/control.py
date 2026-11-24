@@ -1439,7 +1439,11 @@ class ControlCommander(PortableCommander):
             if done_event is None and process_exited:
                 with self._lock:
                     self._sessions.pop(session_id, None)
-                self._audit('stop_session', True, session_id)
+                try:
+                    self._audit('stop_session', True, session_id)
+                except Exception:
+                    # A full audit store must not undo completed termination.
+                    pass
             if not process_exited or not collector_finished:
                 remaining.append(session_id)
                 # The base stop method removes entries immediately after
