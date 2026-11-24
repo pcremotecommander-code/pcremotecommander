@@ -100,6 +100,7 @@ class Coordination:
                 not isinstance(identifier, str)
                 or not isinstance(task, dict)
                 or task.get('id') != identifier
+                or not isinstance(task.get('status'), str)
                 or task.get('status') not in valid_statuses
                 or not isinstance(task.get('resources'), list)
                 or any(not isinstance(item, str) or not item for item in task['resources'])
