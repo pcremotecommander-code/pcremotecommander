@@ -1918,3 +1918,57 @@ def test_detached_command_reuses_workspace_lock_identifiers(pc):
     assert lock_sets[0]==lock_sets[1]
     assert lock_sets[0][0].startswith('session:')
     assert lock_sets[0][1].startswith('session-owner:')
+
+
+
+def test_task_running_detection_includes_fixed_profile_sessions_without_done_event(pc):
+    from types import SimpleNamespace
+
+    store = coordinator(pc)
+    lease = claim(store, 'fixed profile session', ['workspace'])
+    state = {'returncode': None}
+    process = SimpleNamespace(poll=lambda: state['returncode'])
+    pc._sessions['fixed-profile'] = {
+        'profile': 'disk_usage',
+        'task_id': lease['id'],
+        'process': process,
+    }
+    try:
+        assert store.running(lease['id']) is True
+        state['returncode'] = 0
+        assert store.running(lease['id']) is False
+    finally:
+        pc._sessions.pop('fixed-profile', None)
+
+
+def test_task_owned_command_is_stopped_when_persisted_lease_expires(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'lease-bound command', ['workspace'])
+    result = assigned(
+        lease,
+        lambda: pc.start_program(
+            sys.executable, ['-c', 'import time; time.sleep(30)'],
+            timeout_seconds=60,
+        ),
+    )
+    entry = pc._sessions[result['session_id']]
+    assert entry.get('task_id') == lease['id']
+    assert entry.get('task_lease_token') == lease['lease_token']
+
+    with store.store.locked():
+        data = store.load()
+        data['tasks'][lease['id']]['expires_at'] = store.clock() - 1
+        store.save(data)
+
+    assert entry['done'].wait(12), 'expired task command was not terminated'
+    assert entry.get('task_lease_expired') is True
+    with store.store.locked():
+        data = store.load()
+        task = data['tasks'][lease['id']]
+        operation = next(
+            record for record in data['operations'].values()
+            if record.get('kind') == 'detached_command'
+            and record.get('owner', {}).get('supervisor_pid') == result['supervisor_pid']
+        )
+    assert task['status'] == 'needs_review'
+    assert operation['state'] == 'needs_review'
