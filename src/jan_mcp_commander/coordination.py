@@ -562,7 +562,7 @@ class Coordination:
         return any(entry.get('task_id') == task_id and not entry['done'].is_set() for entry in self.commander._sessions.values())
 
     @contextmanager
-    def guard(self, resources, *, allow_active_sessions=False, defer_task_scope=False):
+    def guard(self, resources, *, allow_active_sessions=False, defer_task_scope=False, operation_kind=None):
         targets = sorted(set(resource(item) for item in resources))
         outer_resources = self.depth.get()
         if outer_resources is not None:
@@ -639,6 +639,8 @@ class Coordination:
                     if not valid:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'An operation record is malformed. Inspect private coordination state before continuing.')
                     if any(overlaps(a, b) for a in existing_resources for b in targets):
+                        if existing.get('kind') == 'browser_workflow' and existing.get('state') == 'needs_review':
+                            raise CoordinationError('TASK_CONFLICT', 'A prior browser run has an uncertain outcome. Inspect the page and workflow receipt before starting another run.')
                         raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying.')
                 operations = data.setdefault('operations', {})
                 if len(operations) >= MAX_OPERATION_RECORDS:
@@ -654,6 +656,7 @@ class Coordination:
                 operations[operation_id] = {
                     'id': operation_id,
                     'state': 'active',
+                    'kind': operation_kind,
                     'resources': targets,
                     'owner': {'pid': os.getpid(), 'thread': threading.get_ident()},
                     'task_id': current[0] if current else None,
@@ -737,6 +740,7 @@ def coordinated(kind, *paths):
                 # Document preview schedules work only. Its worker checks each
                 # source and destination path before reading any file.
                 defer_task_scope=method.__name__ == 'preview_document_workflow',
+                operation_kind=method.__name__,
             ):
                 result = method(self, *args, **kwargs)
                 if assignment.get() and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
