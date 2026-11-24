@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from .core import Commander, PermissionDenied, COMMAND_PROFILES, MAX_READ_BYTES
+from .core import Commander, OperationNotApplied, PermissionDenied, COMMAND_PROFILES, MAX_READ_BYTES
 from .safe_fs import parts, unsupported_content
 
 MAX_WRITE = 65536
@@ -119,7 +119,15 @@ class AdvancedCommander(Commander):
     def _write(self, path, content, overwrite):
         data = content.encode('utf-8')
         if len(data) > MAX_WRITE or unsupported_content(data):
-            raise PermissionDenied('Text exceeds limit or contains binary/private key data')
+            raise OperationNotApplied('Text exceeds limit or contains binary/private key data')
+        # Validate the path and parent before entering the mutation section. A
+        # missing/unsafe parent is a definite precondition failure, not an
+        # uncertain write outcome.
+        try:
+            with self._tree.parent(path):
+                pass
+        except (OSError, ValueError) as exc:
+            raise OperationNotApplied('Write path is unavailable or unsafe') from exc
         # Preflight audit must succeed before backup or workspace mutation.
         self._audit('write_intent', True, path)
         with self._lock, self._store.locked():
