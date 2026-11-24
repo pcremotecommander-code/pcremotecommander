@@ -1701,6 +1701,7 @@ def _cross_process_reconcile_worker(state_dir, workspace, operation_id, start, c
     commander = SimpleNamespace(
         _store=SimpleNamespace(path=Path(state_dir)),
         workspace=Path(workspace),
+        _sessions={},
     )
     try:
         start.wait(timeout=15)
