@@ -504,6 +504,191 @@ def _forward_input(source, destination, child_done):
             pass
 
 
+def supervise_linux_guardian(config, lock_fd):
+    """Run a Linux command behind a second subreaper that survives supervisor crashes."""
+    global _CHILD_PGID, _CHILD_PID
+
+    guardian_environment = os.environ.copy()
+    guardian_environment["PCRC_SUPERVISOR_PARENT_PID"] = str(os.getpid())
+    os.set_inheritable(lock_fd, True)
+    guardian = subprocess.Popen(
+        [sys.executable, "-m", "jan_mcp_commander.session_guard"],
+        cwd=config["workspace"],
+        env=guardian_environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+        start_new_session=True,
+        pass_fds=(lock_fd,),
+    )
+    _CHILD_PID = guardian.pid
+    _CHILD_PGID = guardian.pid
+    input_thread = None
+    guardian_done = threading.Event()
+    try:
+        guardian_config = {
+            "role": "guardian",
+            "workspace": config["workspace"],
+            "argv": config["argv"],
+            "lock_fd": lock_fd,
+        }
+        guardian.stdin.write((json.dumps(guardian_config) + "\\n").encode("utf-8"))
+        guardian.stdin.flush()
+
+        import select
+        readable, _, _ = select.select([guardian.stdout], [], [], 15)
+        if not readable:
+            raise TimeoutError("Linux command guardian did not become ready")
+        ready_line = guardian.stdout.readline(4096)
+        if not ready_line:
+            diagnostic = guardian.stderr.read(4096) if guardian.poll() is not None else b""
+            raise RuntimeError(
+                "Linux command guardian exited before starting the command: "
+                + diagnostic.decode("utf-8", "replace")[:240]
+            )
+        ready = json.loads(ready_line.decode("utf-8"))
+        if ready.get("ready") is not True or type(ready.get("pid")) is not int:
+            raise RuntimeError("Linux command guardian returned an invalid handshake")
+        sys.stdout.write(json.dumps(ready) + "\\n")
+        sys.stdout.flush()
+
+        input_thread = threading.Thread(
+            target=_forward_input,
+            args=(sys.stdin.buffer, guardian.stdin, guardian_done),
+            daemon=False,
+        )
+        input_thread.start()
+
+        pipe_closed = False
+        while guardian.poll() is None:
+            if pipe_closed:
+                time.sleep(0.02)
+                continue
+            readable, _, _ = select.select([guardian.stdout], [], [], 0.05)
+            if not readable:
+                continue
+            packet = guardian.stdout.read1(4096)
+            if packet:
+                sys.stdout.buffer.write(packet)
+                sys.stdout.buffer.flush()
+            else:
+                pipe_closed = True
+
+        exit_code = guardian.wait()
+        # If the guardian itself was killed, its orphaned descendants are now
+        # adopted by this supervisor (also a subreaper) and must be reaped here.
+        descendants_terminated = _terminate_linux_descendants()
+        while True:
+            packet = guardian.stdout.read1(4096)
+            if not packet:
+                break
+            sys.stdout.buffer.write(packet)
+            sys.stdout.buffer.flush()
+        if descendants_terminated or exit_code < 0:
+            return 125
+        return exit_code
+    finally:
+        guardian_done.set()
+        if input_thread is not None:
+            input_thread.join()
+        if guardian.poll() is None:
+            try:
+                os.killpg(guardian.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            guardian.wait()
+        for stream in (guardian.stdin, guardian.stdout, guardian.stderr):
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def supervise_guardian(config):
+    """Linux per-command subreaper; keep the workspace lock if its parent dies."""
+    global _CHILD_PGID, _CHILD_PID
+
+    lock_fd = config.get("lock_fd")
+    if type(lock_fd) is not int or lock_fd < 0:
+        raise ValueError("Invalid inherited resource-lock descriptor")
+    # The guardian holds the lock independently. The user command never needs
+    # the descriptor, so closing its unrelated descriptors cannot release it.
+    os.set_inheritable(lock_fd, False)
+    if _PARENT_DEAD.is_set():
+        return 125
+
+    child = subprocess.Popen(
+        config["argv"],
+        cwd=config["workspace"],
+        env=os.environ.copy(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        shell=False,
+        start_new_session=True,
+        close_fds=True,
+    )
+    _CHILD_PID = child.pid
+    _CHILD_PGID = child.pid
+    if _PARENT_DEAD.is_set():
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait()
+        return 125
+
+    sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\\n")
+    sys.stdout.flush()
+    child_done = threading.Event()
+    input_thread = threading.Thread(
+        target=_forward_input,
+        args=(sys.stdin.buffer, child.stdin, child_done),
+        daemon=False,
+    )
+    input_thread.start()
+    try:
+        import select
+        pipe_closed = False
+        while child.poll() is None:
+            if pipe_closed:
+                time.sleep(0.02)
+                continue
+            readable, _, _ = select.select([child.stdout], [], [], 0.05)
+            if not readable:
+                continue
+            packet = child.stdout.read1(4096)
+            if packet:
+                sys.stdout.buffer.write(packet)
+                sys.stdout.buffer.flush()
+            else:
+                pipe_closed = True
+
+        exit_code = child.wait()
+        descendants_terminated = _terminate_linux_descendants()
+        while True:
+            packet = child.stdout.read1(4096)
+            if not packet:
+                break
+            sys.stdout.buffer.write(packet)
+            sys.stdout.buffer.flush()
+        if descendants_terminated or exit_code < 0:
+            return 125
+        return exit_code
+    finally:
+        child_done.set()
+        input_thread.join()
+        if child.poll() is None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+        # Fail closed on every unexpected guardian exit, not just normal exit.
+        _terminate_linux_descendants()
+
+
 def supervise(config):
     global _CHILD_PGID, _CHILD_PID
     store = PrivateStore(Path(config["state_dir"]), Path(config["workspace"]))
@@ -519,6 +704,8 @@ def supervise(config):
             return 125
         if _PARENT_DEAD.is_set():
             return 125
+        if sys.platform == "linux":
+            return supervise_linux_guardian(config, lock_fd)
 
         options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004}
                    if os.name == "nt" else {"start_new_session": True})
@@ -637,6 +824,8 @@ def main():
         if not config_line:
             return 125
         config = json.loads(config_line.decode("utf-8"))
+        if config.get("role") == "guardian":
+            return supervise_guardian(config)
         return supervise(config)
     except BaseException as exc:
         try:
