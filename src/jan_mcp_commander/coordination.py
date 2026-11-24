@@ -153,7 +153,7 @@ class Coordination:
             if malformed:
                 raise CoordinationError(
                     'TASK_STATE_INVALID',
-                    'A browser workflow run in private coordination state is malformed. Inspect it locally; no reservations were released.',
+                    'A browser run record in private coordination state is malformed. Inspect it locally; no reservations were released.',
                 )
 
         valid_statuses = {'queued', 'waiting', 'active', 'needs_review', 'completed', 'failed'}
