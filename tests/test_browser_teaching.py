@@ -2,6 +2,8 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 import pytest
 from jan_mcp_commander.control import ControlCommander
 from jan_mcp_commander.coordination import CoordinationError, assignment, coordinator
@@ -115,6 +117,37 @@ def test_real_browser_demonstration_review_parameterized_replay_and_verification
     pc.browser_workflow('delete', {'workflow_id': draft['id']})
     assert read_workflows(pc, 'list')['workflows'] == []
     assert read_workflows(pc, 'run', run['id'])['status'] == 'passed'
+
+
+def test_concurrent_duplicate_run_step_executes_browser_action_once(demo, monkeypatch):
+    pc = demo
+    draft = demonstrate(pc)
+    pc.browser_workflow('publish', {'workflow_id': draft['id'], 'reviewed': True, 'expected_text': 'Done'})
+    run = pc.browser_workflow('start_run', {'workflow_id': draft['id']})
+
+    entered = Event()
+    release = Event()
+    calls = []
+    original = pc._browser_action
+
+    def blocked(action, target, text):
+        calls.append((action, target))
+        entered.set()
+        assert release.wait(5)
+        return original(action, target, text)
+
+    monkeypatch.setattr(pc, '_browser_action', blocked)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
+        assert entered.wait(5)
+        second = pool.submit(pc.browser_workflow, 'run_next', {'run_id': run['id'], 'expected_step': 0})
+        release.set()
+        assert first.result(timeout=10)['next_step'] == 1
+        with pytest.raises(CoordinationError, match='already advanced'):
+            second.result(timeout=10)
+
+    assert len(calls) == 1
+    assert read_workflows(pc, 'run', run['id'])['next_step'] == 1
 
 
 def test_uncertain_step_never_replays_and_query_links_denied(demo, monkeypatch):
