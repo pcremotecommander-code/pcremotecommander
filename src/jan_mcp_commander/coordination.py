@@ -105,6 +105,7 @@ class Coordination:
                 or run.get('id') != identifier
                 or not isinstance(run.get('task_id'), str)
                 or not run.get('task_id')
+                or not isinstance(run.get('status'), str)
                 or run.get('status') not in valid_run_statuses
                 or not isinstance(workflow, dict)
                 or not isinstance(workflow.get('id'), str)
@@ -127,6 +128,7 @@ class Coordination:
                 for index, step in enumerate(steps):
                     if (
                         not isinstance(step, dict)
+                        or not isinstance(step.get('action'), str)
                         or step.get('action') not in valid_run_actions
                         or not isinstance(step.get('target'), str)
                         or not 1 <= len(step.get('target', '')) <= 512
