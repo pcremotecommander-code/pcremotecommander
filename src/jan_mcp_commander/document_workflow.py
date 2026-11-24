@@ -342,6 +342,21 @@ class DocumentWorkflow:
                         saved[-1].update(verified=True,verification=verification['review'])
                         attempted=None
                     record['status']='completed'
+            except OperationNotApplied as exc:
+                message=str(exc)[:240]
+                try: assert_public_text(message)
+                except ValueError: message='Private content was blocked'
+                # The writer guarantees this exception is raised before a
+                # workspace mutation. If the current output is already in
+                # saved, the exception instead arose during post-write
+                # verification and must remain uncertain.
+                uncertain=attempted is not None and any(
+                    output['path']==attempted['path'] for output in saved)
+                receipts=[*saved,attempted] if attempted is not None and not uncertain else saved
+                record.update(
+                    status='unknown' if uncertain else 'partial' if saved else 'failed',
+                    outputs=receipts,error=message,
+                    outcome_unknown=uncertain,automatic_retry=False)
             except (ValueError,OSError) as exc:
                 message=str(exc)[:240]
                 try: assert_public_text(message)
