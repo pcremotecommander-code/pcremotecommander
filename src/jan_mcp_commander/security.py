@@ -58,6 +58,10 @@ class PrivateStore:
         self.context = hashlib.sha256(str(workspace).encode()).digest()
         self.tree = SafeTree(self.path, internal=True)
         self.mutex = threading.RLock()
+        # Each entry is [RLock, active_users, retained]. Ordinary resource
+        # entries disappear when the last holder/waiter exits. Handoff entries
+        # remain because a child may still hold the inherited OS lock after
+        # this context returns.
         self.resource_mutexes = {}
         try:
             self.tree.write('state.lock', b'0')
@@ -99,6 +103,39 @@ class PrivateStore:
                 os.close(fd)
 
     @contextmanager
+    def _local_resource_lock(self, lock_name, *, blocking=True, retain=False):
+        """Serialize same-process users without retaining idle locks forever."""
+        with self.mutex:
+            entry = self.resource_mutexes.get(lock_name)
+            if entry is None:
+                entry = [threading.RLock(), 0, False]
+                self.resource_mutexes[lock_name] = entry
+            entry[1] += 1
+            if retain:
+                entry[2] = True
+
+        lock = entry[0]
+        acquired = False
+        try:
+            acquired = lock.acquire(blocking=blocking)
+            if not acquired:
+                yield False
+                return
+            yield True
+        finally:
+            if acquired:
+                lock.release()
+            with self.mutex:
+                entry[1] -= 1
+                if (
+                    entry[1] == 0
+                    and not entry[2]
+                    and self.resource_mutexes.get(lock_name) is entry
+                ):
+                    del self.resource_mutexes[lock_name]
+
+
+    @contextmanager
     def resource_locked(self, resource_id):
         """Lock one canonical resource across threads and processes.
 
@@ -108,9 +145,7 @@ class PrivateStore:
         if not isinstance(resource_id, str) or not resource_id:
             raise ValueError('A non-empty resource identifier is required')
         lock_name = 'resource-' + hashlib.sha256(resource_id.encode('utf-8')).hexdigest() + '.lock'
-        with self.mutex:
-            local_lock = self.resource_mutexes.setdefault(lock_name, threading.RLock())
-        with local_lock:
+        with self._local_resource_lock(lock_name):
             try:
                 self.tree.write(lock_name, b'0')
             except FileExistsError:
@@ -158,9 +193,7 @@ class PrivateStore:
         if not isinstance(resource_id, str) or not resource_id:
             raise ValueError('A non-empty resource identifier is required')
         lock_name = 'resource-' + hashlib.sha256(resource_id.encode('utf-8')).hexdigest() + '.lock'
-        with self.mutex:
-            local_lock = self.resource_mutexes.setdefault(lock_name, threading.RLock())
-        with local_lock:
+        with self._local_resource_lock(lock_name, retain=True):
             try:
                 self.tree.write(lock_name, b'0')
             except FileExistsError:
@@ -204,14 +237,13 @@ class PrivateStore:
         if not isinstance(resource_id, str) or not resource_id:
             raise ValueError('A non-empty resource identifier is required')
         lock_name = 'resource-' + hashlib.sha256(resource_id.encode('utf-8')).hexdigest() + '.lock'
-        with self.mutex:
-            local_lock = self.resource_mutexes.setdefault(lock_name, threading.RLock())
-        if not local_lock.acquire(blocking=False):
-            yield False
-            return
         fd = None
         acquired = False
-        try:
+        with self._local_resource_lock(lock_name, blocking=False) as local_acquired:
+            if not local_acquired:
+                yield False
+                return
+            try:
             try:
                 self.tree.write(lock_name, b'0')
             except FileExistsError:
@@ -244,10 +276,9 @@ class PrivateStore:
                     else:
                         os.lseek(fd, 0, os.SEEK_SET)
                         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        finally:
-            if fd is not None:
-                os.close(fd)
-            local_lock.release()
+            finally:
+                if fd is not None:
+                    os.close(fd)
 
     def backup(self, path, data, *, binary=False):
         if binary and len(data) > 8 * 1024 * 1024:
