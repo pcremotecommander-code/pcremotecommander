@@ -2059,7 +2059,7 @@ def test_lease_cannot_be_renewed_at_or_after_expiry_boundary(pc):
     )
     assert current['status'] == 'needs_review'
     assert current['resources'] == ['file:expiry-boundary.txt']
-    assert current['lease_token'] == '' or 'lease_token' not in current
+    assert 'lease_token' not in current
 
     # An expired lease stays fenced even if the clock later moves forward.
     now[0] += 1
