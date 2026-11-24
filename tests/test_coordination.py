@@ -1484,6 +1484,12 @@ def test_detached_command_exit_cannot_be_held_open_by_inherited_output_pipe(pc, 
             assert ready, 'Linux descendant survived direct-command exit'
         finally:
             os.close(pidfd)
+    elif os.name == 'nt':
+        # OpenProcess can report ERROR_INVALID_PARAMETER (87) when the
+        # descendant has already exited before the handle probe.
+        assert ctypes.get_last_error() == 87, (
+            'could not obtain a Windows synchronization handle for the descendant'
+        )
     else:
         try:
             os.kill(pid, 0)
