@@ -933,10 +933,14 @@ class ControlCommander(PortableCommander):
             if task is None:
                 raise PermissionDenied('Task assignment is unavailable or expired; inspect list_tasks.')
             tasks.validate(task, current[1])
-        if entry is not None and entry.get('task_id') != current[0]:
+        if entry is not None and (
+            entry.get('task_id') != current[0]
+            or not isinstance(entry.get('task_lease_token'), str)
+            or entry.get('task_lease_token') != current[1]
+        ):
             raise PermissionDenied(
-                'This command session belongs to another task or the unassigned operator. '
-                'Use the matching task assignment or an unassigned operator session.'
+                'This command session belongs to another task assignment or an earlier lease. '
+                'Use the exact lease that created the session, or stop it from the unassigned operator.'
             )
 
     @staticmethod
@@ -1039,8 +1043,11 @@ class ControlCommander(PortableCommander):
         current = assignment.get()
         if current is not None:
             with self._lock:
-                owned = {session_id for session_id, entry in self._sessions.items()
-                         if entry.get('task_id') == current[0]}
+                owned = {
+                    session_id for session_id, entry in self._sessions.items()
+                    if entry.get('task_id') == current[0]
+                    and entry.get('task_lease_token') == current[1]
+                }
             result['sessions'] = [
                 session for session in result['sessions']
                 if session['session_id'] in owned
