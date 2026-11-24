@@ -260,14 +260,15 @@ def test_review_covers_image_and_destination_changes(commander):
     p=review_jobs(commander,[editing(data)])
     with pytest.raises(ValueError,match='review'):
         apply_review(commander,p['plan_id'],p['review_sha256'],[])
-    (commander.workspace/'revised.docx').write_bytes(docx('Other ','file'))
+    destination_data=docx('Other ','file')
+    (commander.workspace/'revised.docx').write_bytes(destination_data)
     result=apply_review(commander,p['plan_id'],p['review_sha256'],p['jobs'])
     assert result['jobs'][0]['status']=='failed'
     assert result['jobs'][0]['outcome_unknown'] is False
     assert not result['jobs'][0]['automatic_retry']
     # The changed destination is preserved exactly; the rejected plan did
     # not overwrite it or create a replacement.
-    assert (commander.workspace/'revised.docx').read_bytes()==docx('Other ','file')
+    assert (commander.workspace/'revised.docx').read_bytes()==destination_data
 
 
 def test_complex_tables_and_inline_images_fail_explicitly():
