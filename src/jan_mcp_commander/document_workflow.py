@@ -352,7 +352,7 @@ class DocumentWorkflow:
                 # verification and must remain uncertain.
                 uncertain=attempted is not None and any(
                     output['path']==attempted['path'] for output in saved)
-                receipts=[*saved,attempted] if attempted is not None and not uncertain else saved
+                receipts=saved
                 record.update(
                     status='unknown' if uncertain else 'partial' if saved else 'failed',
                     outputs=receipts,error=message,
