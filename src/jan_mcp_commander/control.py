@@ -997,7 +997,21 @@ class ControlCommander(PortableCommander):
     def browser_workflow(self, action, options=None):
         self._check('browser')
         from .browser_teaching import workflow_action
-        return self._browser_executor.submit(copy_context().run, workflow_action, self, action, options or {}).result(timeout=18)
+        from .coordination import CoordinationError
+        try:
+            return self._browser_executor.submit(copy_context().run, workflow_action, self, action, options or {}).result(timeout=18)
+        except CoordinationError as exc:
+            # workflow_action records WORKFLOW_OUTCOME_UNKNOWN only after a
+            # browser step has been dispatched. Other workflow conflicts are
+            # rejected before dispatch and must not poison the UI reservation.
+            if exc.code != 'WORKFLOW_OUTCOME_UNKNOWN':
+                raise OperationNotApplied(str(exc)) from exc
+            raise
+        except ValueError as exc:
+            # Invalid workflow arguments are rejected before any replay step.
+            if action != 'run_next':
+                raise OperationNotApplied(str(exc)) from exc
+            raise
 
     @staticmethod
     def _foreground_window():
