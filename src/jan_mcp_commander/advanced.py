@@ -44,11 +44,11 @@ class AdvancedCommander(Commander):
         deadline=time.monotonic()+15
         self._rate()
         if not self.allow_writes or type(overwrite) is not bool:
-            raise PermissionDenied('PDF write requires explicit local write permission')
+            raise OperationNotApplied('PDF write requires explicit local write permission')
         if not isinstance(destination, str) or not destination.casefold().endswith('.pdf'):
-            raise PermissionDenied('Choose a relative PDF destination')
+            raise OperationNotApplied('Choose a relative PDF destination')
         if overwrite and not expected_destination_sha256:
-            raise PermissionDenied('Inspect the overwrite destination first; its SHA-256 is required')
+            raise OperationNotApplied('Inspect the overwrite destination first; its SHA-256 is required')
         try:
             value = process_pdf(self._tree, path, pages=pages, rotation=rotation,deadline=deadline)
             if value['sha256'] != expected_sha256:
