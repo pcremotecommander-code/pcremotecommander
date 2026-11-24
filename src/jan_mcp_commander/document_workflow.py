@@ -133,7 +133,17 @@ class DocumentWorkflow:
             done=threading.Event();self.running[plan_id]=done
         context=copy_context()
         def execute():
-            try:context.run(function,*args)
+            def run_without_parent_reservation():
+                # Keep the claimed task identity, but do not inherit the
+                # scheduling call's workspace reservation into this worker.
+                # The worker must acquire and validate each exact file scope.
+                coordination=coordinator(self.commander)
+                marker=coordination.depth.set(None)
+                try:
+                    return function(*args)
+                finally:
+                    coordination.depth.reset(marker)
+            try:context.run(run_without_parent_reservation)
             except Exception:
                 # Applying failures stay unknown; preparation has made no document writes.
                 try:
