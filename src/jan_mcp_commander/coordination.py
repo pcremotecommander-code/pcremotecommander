@@ -674,6 +674,21 @@ class Coordination:
                         )
                         self.save(data)
                 raise
+            except OperationNotApplied:
+                # Explicitly typed precondition failures are guaranteed to
+                # occur before a mutation or external dispatch. Retain their
+                # original public error while closing the reservation cleanly.
+                with self.store.locked():
+                    data = self.load()
+                    record = data.get('operations', {}).get(operation_id)
+                    if record and record.get('state') == 'active':
+                        record.update(
+                            state='failed',
+                            note='A verified precondition rejected the operation before mutation.',
+                            finished_at=self.clock(),
+                        )
+                        self.save(data)
+                raise
             except CoordinationError as exc:
                 # Coordination rejections are pre-dispatch by contract. The
                 # browser workflow uses WORKFLOW_OUTCOME_UNKNOWN only when a
