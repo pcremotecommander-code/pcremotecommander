@@ -2,9 +2,9 @@ name: Source checks
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, next, work/full-concurrency-upgrade]
   pull_request:
-    branches: [main, next]
+    branches: [main, next, work/full-concurrency-upgrade]
   workflow_dispatch:
 
 permissions:
