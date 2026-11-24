@@ -199,9 +199,9 @@ class ControlCommander(PortableCommander):
         from .media_tools import process_media
         extensions={'image':'.jpg','audio':'.wav','video':'.mp4'}
         if kind not in extensions or not isinstance(destination,str) or not destination.casefold().endswith(extensions[kind]):
-            raise PermissionDenied('Use a relative .jpg image, .wav audio or .mp4 video destination')
+            raise OperationNotApplied('Use a relative .jpg image, .wav audio or .mp4 video destination')
         if overwrite and not expected_destination_sha256:
-            raise PermissionDenied('Inspect overwrite destination first; its SHA-256 is required')
+            raise OperationNotApplied('Inspect overwrite destination first; its SHA-256 is required')
         try:
             value=process_media(self._tree,self._store.path/'media',path,'edit',kind,start=start,seconds=seconds,
                                 width=width,height=height,rotation=rotation,deadline=deadline)
@@ -229,8 +229,11 @@ class ControlCommander(PortableCommander):
         self._check('files')
         self._rate()
         if not isinstance(destination, str) or not destination.casefold().endswith('.pdf'):
-            raise PermissionDenied('Choose a relative PDF destination')
-        data, pages = create_text_pdf(text)
+            raise OperationNotApplied('Choose a relative PDF destination')
+        try:
+            data, pages = create_text_pdf(text)
+        except (ValueError, PermissionDenied) as exc:
+            raise OperationNotApplied(str(exc)) from exc
         return {**self._write_binary(destination, data), 'page_count': pages}
 
     @coordinated('files','path')
