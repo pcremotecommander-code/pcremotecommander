@@ -15,7 +15,7 @@ def build_server(commander: PortableCommander) -> MCPServer:
     @directory_tool(server, annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     @tool_errors(commander)
     def jan_task_state() -> dict:
-        """List bounded local shared tasks without exposing assignment tokens."""
+        """List bounded local shared tasks and unresolved operation IDs without exposing tokens, paths or command text."""
         from .coordination import coordinator
         return coordinator(commander).task('list')
 
