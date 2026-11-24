@@ -137,11 +137,16 @@ class ControlCommander(PortableCommander):
         from .security_scan import scan_bytes
         self._check('files')
         if not isinstance(path,str) or not path.casefold().endswith('.pdf'):
-            raise ValueError('Choose a workspace PDF')
+            raise OperationNotApplied('Choose a workspace PDF')
         deadline=time.monotonic()+14
-        data=self._tree.read(path,8*1024*1024);scan=scan_bytes(data,'.pdf',deadline=deadline)
-        result=worker({'kind':'inspect_pdf','path':path,'pages':[1] if pages is None else pages},{path:data},deadline)
-        return {**result['review'],'images':result['images'],'path':path,'sha256':hashlib.sha256(data).hexdigest(),'security_scan':scan}
+        try:
+            data=self._tree.read(path,8*1024*1024);scan=scan_bytes(data,'.pdf',deadline=deadline)
+            result=worker({'kind':'inspect_pdf','path':path,'pages':[1] if pages is None else pages},{path:data},deadline)
+            return {**result['review'],'images':result['images'],'path':path,'sha256':hashlib.sha256(data).hexdigest(),'security_scan':scan}
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied,ValueError,OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     def _require_binary_write(self):
         self._require_capability('files')
@@ -151,8 +156,13 @@ class ControlCommander(PortableCommander):
     def inspect_office(self,path,sheet='',start_row=1,max_rows=50):
         from .office_documents import process_office
         self._check('files')
-        self._audit('inspect_office',True,path)
-        return process_office(self._tree,path,sheet=sheet,start_row=start_row,max_rows=max_rows)
+        try:
+            self._audit('inspect_office',True,path)
+            return process_office(self._tree,path,sheet=sheet,start_row=start_row,max_rows=max_rows)
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied,ValueError,OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     def preview_spreadsheet(self,path,sheet,changes,expected_sha256):
         return self.edit_spreadsheet(path,sheet,changes,expected_sha256,dry_run=True)
@@ -181,15 +191,25 @@ class ControlCommander(PortableCommander):
     def inspect_media(self,path,kind,start=0,seconds=10):
         self._check('files')
         from .media_tools import process_media
-        self._audit('inspect_media',True,path)
-        return process_media(self._tree,self._store.path/'media',path,'inspect',kind,start=start,seconds=seconds)
+        try:
+            self._audit('inspect_media',True,path)
+            return process_media(self._tree,self._store.path/'media',path,'inspect',kind,start=start,seconds=seconds)
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied,ValueError,OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files','path')
     def transcribe_audio(self,path,start=0,seconds=10):
         self._check('files')
         from .media_tools import process_media
-        self._audit('transcribe_audio',True,path)
-        return process_media(self._tree,self._store.path/'media',path,'transcribe','audio',start=start,seconds=seconds)
+        try:
+            self._audit('transcribe_audio',True,path)
+            return process_media(self._tree,self._store.path/'media',path,'transcribe','audio',start=start,seconds=seconds)
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied,ValueError,OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files','path','destination')
     def edit_media(self,path,destination,kind,expected_sha256,start=0,seconds=10,width=1280,height=720,
@@ -239,7 +259,12 @@ class ControlCommander(PortableCommander):
     @coordinated('files','path')
     def read_pdf(self, path):
         self._check('files')
-        return super().read_pdf(path)
+        try:
+            return super().read_pdf(path)
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied,ValueError,OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files', 'path', 'destination')
     def rewrite_pdf(self, path, destination, expected_sha256, pages, rotation=0,
