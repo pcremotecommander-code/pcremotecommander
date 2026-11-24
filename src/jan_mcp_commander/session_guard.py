@@ -616,6 +616,10 @@ def supervise_linux_guardian(config, lock_fd):
                 stream.close()
             except OSError:
                 pass
+        # If startup or forwarding failed after the guardian launched the
+        # user command, its descendants are now adopted by this subreaper.
+        # Do not release the handoff lock until that tree is gone.
+        _terminate_linux_descendants()
 
 
 def supervise_guardian(config):
