@@ -1853,10 +1853,10 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
     pidfd=None
     try:
         deadline=time.monotonic()+10
-        while not pid_file.exists() and time.monotonic()<deadline:
+        while (not pid_file.exists() or not pid_file.read_text().strip()) and time.monotonic()<deadline:
             time.sleep(0.01)
-        assert pid_file.exists(), 'detached grandchild did not start'
-        pid=int(pid_file.read_text())
+        assert pid_file.exists() and pid_file.read_text().strip(), 'detached grandchild did not publish its PID'
+        pid=int(pid_file.read_text().strip())
         pidfd=os.pidfd_open(pid,0)
 
         # Killing the outer supervisor must not orphan a detached process that
