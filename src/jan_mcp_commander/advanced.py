@@ -193,21 +193,29 @@ class AdvancedCommander(Commander):
     def _write_binary(self, path, data, *, overwrite=False, expected_sha256=None, deadline=None):
         """Internal media writer; explicit overwrite keeps an encrypted binary backup."""
         from .privacy import assert_public_text
+        # Audit append takes its own private-store lock, so keep it outside the
+        # store-locked preflight below.
+        try:
+            self._require_binary_write()
+            if not self.allow_writes or not isinstance(data, bytes) or len(data) > 8 * 1024 * 1024:
+                raise PermissionDenied('Binary write denied or exceeds 8 MiB')
+            assert_public_text(data)
+            if str(path).casefold().endswith(('.xlsx','.docx')):
+                from .office_documents import package
+                package(data)
+            if str(path).casefold().endswith('.pdf'):
+                from .pdf_tools import inspect_pdf_bytes
+                inspect_pdf_bytes(data,deadline=deadline)
+            self._audit('media_write_intent', True, path)
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied, ValueError, OSError) as exc:
+            raise OperationNotApplied(str(exc)) from exc
+
         with self._lock, self._store.locked():
-            # Everything in this block is preflight or private recovery
-            # preparation. No workspace bytes are changed until _tree.write.
+            # Everything here is preflight or private recovery preparation.
+            # No workspace bytes change until _tree.write below.
             try:
-                self._require_binary_write()
-                if not self.allow_writes or not isinstance(data, bytes) or len(data) > 8 * 1024 * 1024:
-                    raise PermissionDenied('Binary write denied or exceeds 8 MiB')
-                assert_public_text(data)
-                if str(path).casefold().endswith(('.xlsx','.docx')):
-                    from .office_documents import package
-                    package(data)
-                if str(path).casefold().endswith('.pdf'):
-                    from .pdf_tools import inspect_pdf_bytes
-                    inspect_pdf_bytes(data,deadline=deadline)
-                self._audit('media_write_intent', True, path)
                 self._require_binary_write()
                 try:
                     old = self._tree.read(path, 8 * 1024 * 1024)
