@@ -34,6 +34,27 @@ def assigned(task, call):
         assignment.reset(marker)
 
 
+def persisted_run(identifier, task_id, status='ready'):
+    return {
+        'id': identifier,
+        'task_id': task_id,
+        'workflow': {
+            'id': 'workflow',
+            'title': 'Synthetic workflow',
+            'steps': [
+                {'action': 'open', 'target': 'http://example.test/'},
+                {'action': 'click', 'target': '#done', 'before_url': 'http://example.test/'},
+            ],
+            'status': 'published',
+            'expected_url': 'http://example.test/',
+            'expected_text': 'Done',
+            'version': 1,
+        },
+        'next_step': 2 if status in {'passed', 'failed'} else 0,
+        'status': status,
+    }
+
+
 def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
@@ -283,7 +304,7 @@ def test_failed_workflow_requires_review_before_task_release_and_new_lease(pc):
     lease = claim(store, 'uncertain workflow', ['ui'])
     with store.store.locked():
         data = store.load()
-        data['runs']['synthetic'] = {'task_id': lease['id'], 'status': 'unknown', 'workflow': {'id': 'workflow'}}
+        data['runs']['synthetic'] = persisted_run('synthetic', lease['id'], 'unknown')
         store.save(data)
     with pytest.raises(CoordinationError, match='browser run'):
         store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'], status='queued')
@@ -299,7 +320,7 @@ def test_finishing_abandons_only_unstarted_remaining_steps_while_handoff_preserv
     lease = claim(store, 'handoff workflow', ['ui'])
     with store.store.locked():
         data = store.load()
-        data['runs']['ready'] = {'task_id': lease['id'], 'status': 'ready'}
+        data['runs']['ready'] = persisted_run('ready', lease['id'])
         store.save(data)
     store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'], status='queued')
     with store.store.locked():
@@ -712,11 +733,7 @@ def test_task_reconciliation_rechecks_new_uncertain_runs_before_release(pc, monk
         original(stack, operation)
         with store.store.locked():
             data = store.load()
-            data['runs']['late-uncertain-run'] = {
-                'task_id': lease['id'],
-                'status': 'unknown',
-                'workflow': {'step': 'write'},
-            }
+            data['runs']['late-uncertain-run'] = persisted_run('late-uncertain-run', lease['id'], 'unknown')
             store.save(data)
 
     monkeypatch.setattr(store, '_hold_review_operation_locks', add_uncertain_run)
