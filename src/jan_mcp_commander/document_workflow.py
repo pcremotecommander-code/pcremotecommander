@@ -15,6 +15,7 @@ from contextvars import copy_context
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .coordination import CoordinationError, assignment, coordinator, resource
+from .core import OperationNotApplied
 from .environment import runtime_environment
 from .privacy import assert_public_text
 from .safe_fs import parts
@@ -236,19 +237,27 @@ class DocumentWorkflow:
                 self.commander._require_capability('files')
                 names,_=input_spec(job)
                 with coordinator(self.commander).guard([resource('file:'+name) for name in [*names,*outputs(job)]]):
-                    assets=snapshot(self.commander,job,deadline)
-                    for path in outputs(job):
-                        try: existing=self.commander._tree.read(path,MAX_FILE)
-                        except FileNotFoundError: existing=None
-                        if existing is not None and not job.get('overwrite'): raise ValueError('Output exists; choose a new file')
-                        if job.get('overwrite') and (existing is None or digest(existing)!=job.get('expected_destination_sha256')):
-                            raise ValueError('Destination changed; inspect it and preview again')
-                    result=worker(job,assets,deadline)
+                    try:
+                        assets=snapshot(self.commander,job,deadline)
+                        for path in outputs(job):
+                            try: existing=self.commander._tree.read(path,MAX_FILE)
+                            except FileNotFoundError: existing=None
+                            if existing is not None and not job.get('overwrite'): raise ValueError('Output exists; choose a new file')
+                            if job.get('overwrite') and (existing is None or digest(existing)!=job.get('expected_destination_sha256')):
+                                raise ValueError('Destination changed; inspect it and preview again')
+                        result=worker(job,assets,deadline)
+                    except (CoordinationError,OperationNotApplied):
+                        raise
+                    except Exception as exc:
+                        # Preparation reads sources and builds output in memory;
+                        # it never writes workspace files. These are safe
+                        # preconditions, not uncertain side effects.
+                        raise OperationNotApplied(str(exc)) from exc
                 hashes={path:digest(data) for path,data in assets.items()}
                 record={'status':'ready','kind':job['kind'],'sources':hashes,'review':result['review'],
                     'outputs':[{'path':o['path'],'sha256':digest(o['bytes']),'bytes':len(o['bytes'])} for o in result['outputs']]}
                 records.append(record);prepared.append({'job':job,'sources':hashes})
-            except (CoordinationError,ValueError,OSError) as exc:
+            except (CoordinationError,OperationNotApplied,ValueError,OSError) as exc:
                 message=str(exc)[:240]
                 try: assert_public_text(message)
                 except ValueError: message='Private content was blocked'
@@ -286,13 +295,20 @@ class DocumentWorkflow:
                 self.commander._require_binary_write()
                 job=prepared['job']
                 with coordinator(self.commander).guard([resource('file:'+name) for name in [*prepared['sources'],*outputs(job)]]):
-                    assets=snapshot(self.commander,job,deadline)
-                    if {path:digest(data) for path,data in assets.items()}!=prepared['sources']: raise ValueError('Source or image changed after review')
-                    result=worker(job,assets,deadline)
-                    proposed=[{'path':o['path'],'sha256':digest(o['bytes']),'bytes':len(o['bytes'])} for o in result['outputs']]
-                    if proposed!=record['outputs'] or result['review']!=record['review']: raise ValueError('Prepared output differs from the reviewed plan')
-                    record['status']='applying'
-                    with self.store.locked(): plans=self.load();plans[plan_id]=plan;self.save(plans)
+                    try:
+                        assets=snapshot(self.commander,job,deadline)
+                        if {path:digest(data) for path,data in assets.items()}!=prepared['sources']: raise ValueError('Source or image changed after review')
+                        result=worker(job,assets,deadline)
+                        proposed=[{'path':o['path'],'sha256':digest(o['bytes']),'bytes':len(o['bytes'])} for o in result['outputs']]
+                        if proposed!=record['outputs'] or result['review']!=record['review']: raise ValueError('Prepared output differs from the reviewed plan')
+                        record['status']='applying'
+                        with self.store.locked(): plans=self.load();plans[plan_id]=plan;self.save(plans)
+                    except (CoordinationError,OperationNotApplied):
+                        raise
+                    except Exception as exc:
+                        # No workspace output is attempted until after this
+                        # entire validation block completes.
+                        raise OperationNotApplied(str(exc)) from exc
                     for output in result['outputs']:
                         path,data=output['path'],output['bytes']
                         attempted={'path':path,'verified':False,'outcome_unknown':True,'automatic_retry':False}
