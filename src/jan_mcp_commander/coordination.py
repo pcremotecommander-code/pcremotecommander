@@ -508,6 +508,12 @@ class Coordination:
                         'task_id': operation.get('task_id'),
                         'resource_scopes': sorted(scopes) or ['unknown'],
                     }
+                    owner = operation.get('owner')
+                    if isinstance(owner, dict):
+                        for process_field in ('supervisor_pid', 'child_pid'):
+                            process_id = owner.get(process_field)
+                            if type(process_id) is int and process_id > 0:
+                                summary[process_field] = process_id
                     if isinstance(operation.get('started_at'), (int, float)):
                         summary['started_at'] = operation['started_at']
                     if isinstance(operation.get('note'), str):
