@@ -1005,12 +1005,12 @@ class ControlCommander(PortableCommander):
         if action in {'open', 'new_tab'} and not (action == 'new_tab' and target == 'about:blank'):
             url = urlsplit(target)
             if url.scheme not in {'http', 'https'} or not url.hostname or url.username or url.password:
-                raise PermissionDenied('Open an http(s) URL without embedded credentials')
+                raise OperationNotApplied('Open an http(s) URL without embedded credentials')
         if self._browser is None:
             try:
                 from playwright.sync_api import sync_playwright
             except ImportError as exc:
-                raise PermissionDenied('Install the browser extra and Chromium locally; see docs/computer-control.md') from exc
+                raise OperationNotApplied('Install the browser extra and Chromium locally; see docs/computer-control.md') from exc
             driver = sync_playwright().start()
             browser = None
             try:
@@ -1040,7 +1040,7 @@ class ControlCommander(PortableCommander):
                 'url':urlsplit(p.url)._replace(query='',fragment='').geturl(),'active':p==page} for key,p in self._browser_pages.items()]}
         if action in {'select_tab', 'close_tab'}:
             selected = self._browser_pages.get(target)
-            if selected is None: raise PermissionDenied('Unknown browser tab; list tabs first')
+            if selected is None: raise OperationNotApplied('Unknown browser tab; list tabs first')
             if action == 'close_tab':
                 selected.close()
                 del self._browser_pages[target]
@@ -1053,7 +1053,7 @@ class ControlCommander(PortableCommander):
                 page.bring_to_front()
             self._browser = (*self._browser[:3], page)
         if action == 'new_tab':
-            if len(self._browser_pages) >= 8: raise PermissionDenied('Browser tab limit reached')
+            if len(self._browser_pages) >= 8: raise OperationNotApplied('Browser tab limit reached')
             page = context.new_page()
             page.on('dialog', lambda dialog: dialog.dismiss())
             self._browser_pages[uuid.uuid4().hex] = page
@@ -1200,7 +1200,7 @@ class ControlCommander(PortableCommander):
     def inspect_desktop_controls(self, fallback_to_screenshot=False):
         self._check('desktop')
         if type(fallback_to_screenshot) is not bool:
-            raise ValueError('Screenshot fallback must be boolean')
+            raise OperationNotApplied('Screenshot fallback must be boolean')
         from .windows_uia import FILE_DIALOG_MESSAGE, query, public_control, UIAutomationError
         with self._ui_lock:
             self._uia_inspection=None
@@ -1237,7 +1237,7 @@ class ControlCommander(PortableCommander):
                         'fallback':'If the intended control is absent, capture_desktop and review a fresh frame; never guess coordinates.'}
             except UIAutomationError as exc:
                 if exc.code not in {'UIA_UNAVAILABLE','UIA_FILE_DIALOG'}:
-                    raise
+                    raise OperationNotApplied(str(exc)) from exc
                 if fallback_to_screenshot:
                     return {**self.desktop_action('screenshot'),'method':'screenshot','uia_status':'unavailable','uia_reason':str(exc)}
                 return {'method':'uia_unavailable','reason':str(exc),'window':public.get('window',{}),'visited':public.get('visited',0),'controls':[],'fallback_tool':'capture_desktop',
@@ -1249,10 +1249,13 @@ class ControlCommander(PortableCommander):
         from .windows_uia import query, UIAutomationError, UIAutomationPreconditionError
         from .privacy import assert_public_text
         if action not in {'invoke','set_value'} or not isinstance(text,str) or len(text)>1024 or any(ord(c)<32 for c in text):
-            raise ValueError('Choose invoke or set_value with at most 1024 printable characters')
-        assert_public_text(text)
+            raise OperationNotApplied('Choose invoke or set_value with at most 1024 printable characters')
+        try:
+            assert_public_text(text)
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
         if action=='invoke' and text:
-            raise ValueError('Invoke takes no text')
+            raise OperationNotApplied('Invoke takes no text')
         with self._ui_lock:
             current=self._uia_inspection
             self._uia_inspection=None
@@ -1304,7 +1307,7 @@ class ControlCommander(PortableCommander):
         try:
             import pyautogui as ui
         except ImportError as exc:
-            raise PermissionDenied('Install the desktop extra locally; see docs/computer-control.md') from exc
+            raise OperationNotApplied('Install the desktop extra locally; see docs/computer-control.md') from exc
         with self._ui_lock:
             self._uia_inspection = None
             ui.FAILSAFE = True
@@ -1322,7 +1325,7 @@ class ControlCommander(PortableCommander):
                     focus = focused_window()
                 result = {**jpeg(ui.screenshot()),'method':'screenshot'}
                 if foreground != self._foreground_window() or (os.name == 'nt' and focus != focused_window()):
-                    raise PermissionDenied('Foreground changed during frame capture')
+                    raise OperationNotApplied('Foreground changed during frame capture')
                 identifier = uuid.uuid4().hex
                 self._desktop_frame = (identifier, time.monotonic(), (width,height), foreground, focus)
                 result.update(frame_id=identifier, frame_expires_seconds=30, foreground_window=foreground,
