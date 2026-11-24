@@ -554,14 +554,18 @@ class ControlCommander(PortableCommander):
 
     @coordinated('workspace')
     def start_session(self, profile):
-        self._check('commands')
-        result = super().start_session(profile)
-        current = assignment.get()
-        if current:
-            entry = self._sessions.get(result.get('session_id'))
-            if entry is not None:
-                entry['task_id'] = current[0]
-        return result
+        # Hold the session lock across validation and publication. Shutdown
+        # either wins first and rejects this start, or waits and then stops the
+        # newly registered session.
+        with self._lock:
+            self._check('commands')
+            result = super().start_session(profile)
+            current = assignment.get()
+            if current:
+                entry = self._sessions.get(result.get('session_id'))
+                if entry is not None:
+                    entry['task_id'] = current[0]
+            return result
 
     @coordinated('workspace')
     def start_process(self, command, shell='system', timeout_seconds=300):
@@ -636,6 +640,10 @@ class ControlCommander(PortableCommander):
         lifetime = max(1, min(timeout_seconds, int(self.expires-time.monotonic())))
 
         def launch():
+            # _start_owned_session calls launch while holding self._lock.
+            # Revalidate here to close the race where disable_control wins
+            # after the public method's first permission check.
+            self._require_capability('commands')
             from .session_guard import (
                 create_windows_job_handle, close_windows_job_handle,
                 terminate_windows_job_and_wait,
