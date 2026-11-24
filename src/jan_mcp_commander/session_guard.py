@@ -540,7 +540,7 @@ def supervise_linux_guardian(config, lock_fd):
         output_fd = guardian.stdout.fileno()
         ready_deadline = time.monotonic() + 15
         ready_line = bytearray()
-        while not ready_line.endswith(b"\\n") and len(ready_line) < 4096:
+        while not ready_line.endswith(b"\n") and len(ready_line) < 4096:
             remaining = ready_deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Linux command guardian did not become ready")
@@ -551,7 +551,7 @@ def supervise_linux_guardian(config, lock_fd):
             if not packet:
                 break
             ready_line.extend(packet)
-        if not ready_line.endswith(b"\\n"):
+        if not ready_line.endswith(b"\n"):
             diagnostic = guardian.stderr.read(4096) if guardian.poll() is not None else b""
             raise RuntimeError(
                 "Linux command guardian exited before starting the command: "
