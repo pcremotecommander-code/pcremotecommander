@@ -1999,3 +1999,45 @@ def test_command_session_cannot_transfer_to_new_lease_for_same_task(pc):
     # The unassigned local operator can still inspect old sessions, while a
     # different task lease cannot inherit their access.
     assert 'lease-owned' in pc.process_output(result['session_id'])['output']
+
+
+def test_task_reconciliation_does_not_overwrite_a_concurrent_lease_renewal(pc, monkeypatch):
+    now = [1000.0]
+    store = Coordination(pc, clock=lambda: now[0])
+    lease = claim(store, 'renew during reconciliation', ['file:renew-race.txt'])
+    operation_id = 'renew-race-operation'
+    with store.store.locked():
+        data = store.load()
+        data['operations'][operation_id] = {
+            'id': operation_id,
+            'state': 'needs_review',
+            'resources': ['file:renew-race.txt'],
+            'owner': {'pid': 999999, 'thread': 2},
+            'task_id': lease['id'],
+            'started_at': now[0],
+        }
+        store.save(data)
+
+    original = store._hold_review_operation_locks
+
+    def renew_after_resource_locks(stack, operation):
+        original(stack, operation)
+        now[0] += 10
+        renewed = store.task(
+            'renew', task_id=lease['id'], lease_token=lease['lease_token'])
+        assert renewed['status'] == 'active'
+
+    monkeypatch.setattr(store, '_hold_review_operation_locks',
+                        renew_after_resource_locks)
+
+    with pytest.raises(CoordinationError, match='assignment changed during reconciliation'):
+        store.task('reconcile', task_id=lease['id'], reviewed=True)
+
+    with store.store.locked():
+        data = store.load()
+    task = data['tasks'][lease['id']]
+    assert task['status'] == 'active'
+    assert task['lease_token'] == lease['lease_token']
+    assert task['expires_at'] == now[0] + 120
+    assert task['resources'] == ['file:renew-race.txt']
+    assert data['operations'][operation_id]['state'] == 'needs_review'
