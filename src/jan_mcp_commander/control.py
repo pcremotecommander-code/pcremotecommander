@@ -162,9 +162,15 @@ class ControlCommander(PortableCommander):
         self._check('files')
         if type(dry_run) is not bool or not isinstance(path,str) or not path.casefold().endswith('.xlsx'):
             raise PermissionDenied('Choose an XLSX file and boolean dry_run')
-        result=process_office(self._tree,path,sheet=sheet,changes=changes,dry_run=dry_run)
-        if result['sha256']!=expected_sha256:
-            raise PermissionDenied('File changed; inspect it again before editing')
+        try:
+            result=process_office(self._tree,path,sheet=sheet,changes=changes,dry_run=dry_run)
+            if result['sha256']!=expected_sha256:
+                raise OperationNotApplied('File changed; inspect it again before editing')
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied, ValueError) as exc:
+            # Office processing is read-only until _write_binary below.
+            raise OperationNotApplied(str(exc)) from exc
         if dry_run:
             return result
         write=self._write_binary(path,result.pop('bytes'),overwrite=True,expected_sha256=expected_sha256)
@@ -195,9 +201,17 @@ class ControlCommander(PortableCommander):
             raise PermissionDenied('Use a relative .jpg image, .wav audio or .mp4 video destination')
         if overwrite and not expected_destination_sha256:
             raise PermissionDenied('Inspect overwrite destination first; its SHA-256 is required')
-        value=process_media(self._tree,self._store.path/'media',path,'edit',kind,start=start,seconds=seconds,
-                            width=width,height=height,rotation=rotation,deadline=deadline)
-        if value['sha256']!=expected_sha256:raise PermissionDenied('Source changed; inspect it again')
+        try:
+            value=process_media(self._tree,self._store.path/'media',path,'edit',kind,start=start,seconds=seconds,
+                                width=width,height=height,rotation=rotation,deadline=deadline)
+            if value['sha256']!=expected_sha256:
+                raise OperationNotApplied('Source changed; inspect it again')
+        except OperationNotApplied:
+            raise
+        except (PermissionDenied, ValueError) as exc:
+            # Media processing only reads the source and builds output in
+            # memory. The workspace write begins only after this preflight.
+            raise OperationNotApplied(str(exc)) from exc
         result=self._write_binary(destination,value.pop('bytes'),overwrite=overwrite,expected_sha256=expected_destination_sha256,deadline=deadline)
         return {**value,**result,'source_sha256':expected_sha256}
 
