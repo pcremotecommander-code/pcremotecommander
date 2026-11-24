@@ -805,7 +805,7 @@ def coordinated(kind, *paths):
             ):
                 result = method(self, *args, **kwargs)
                 current = assignment.get()
-                if current and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
+                if current and method.__name__ in {'start_process', 'start_program'} and isinstance(result, dict):
                     entry = self._sessions.get(result.get('session_id'))
                     if entry is not None:
                         entry['task_id'] = current[0]
