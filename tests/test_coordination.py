@@ -1940,6 +1940,40 @@ def test_task_state_exposes_sanitized_unresolved_operation_ids_for_recovery(pc):
     reviewed=store.task('reconcile_operation',operation_id=operation_id,reviewed=True)
     assert reviewed['state']=='abandoned_after_review'
 
+
+def test_unresolved_workspace_operation_blocks_claim_until_explicit_review(pc):
+    store = coordinator(pc)
+    operation_id = 'b' * 32
+    with store.store.locked():
+        data = store.load()
+        data.setdefault('operations', {})[operation_id] = {
+            'id': operation_id,
+            'state': 'needs_review',
+            'kind': 'synthetic_workspace_operation',
+            'resources': ['workspace'],
+            'lock_resources': ['workspace'],
+            'task_id': None,
+            'owner': {'supervisor_pid': 999999, 'child_pid': None},
+            'started_at': store.clock(),
+            'note': 'Synthetic fixture; no external work was performed.',
+        }
+        store.save(data)
+
+    task = store.task('create', title='Workspace must remain reserved')
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=task['id'], agent='test-agent',
+                   resources=['workspace'], wait=False)
+    assert error.value.code == 'TASK_CONFLICT'
+    assert next(item for item in store.task('list')['tasks']
+                if item['id'] == task['id'])['status'] == 'queued'
+
+    reviewed = store.task('reconcile_operation',
+                          operation_id=operation_id, reviewed=True)
+    assert reviewed['state'] == 'abandoned_after_review'
+    claimed = store.task('claim', task_id=task['id'], agent='test-agent',
+                         resources=['workspace'], wait=False)
+    assert claimed['status'] == 'active'
+
 def test_detached_command_reuses_workspace_lock_identifiers(pc):
     store=coordinator(pc)
     lock_sets=[]
