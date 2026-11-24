@@ -414,3 +414,40 @@ def test_receipt_polling_does_not_reserve_workspace(commander):
     with store.guard(['file:unrelated.txt']):
         receipt=commander.get_document_workflow(plan['plan_id'])
     assert receipt['status']=='previewed'
+
+def test_expired_task_lease_during_document_apply_is_safe_prewrite_failure(commander,monkeypatch):
+    from threading import Event
+    from jan_mcp_commander import document_workflow as module
+    from jan_mcp_commander.coordination import assignment,coordinator
+
+    data=docx();(commander.workspace/'source.docx').write_bytes(data)
+    store=coordinator(commander)
+    task=store.task('create',title='File-scoped document task')
+    lease=store.task('claim',task_id=task['id'],agent='document worker',
+                     resources=['file:source.docx','file:revised.docx'])
+    marker=assignment.set((lease['id'],lease['lease_token']))
+    release=Event();entered=Event()
+    actual=module.DocumentWorkflow.execute
+    def blocked(self,plan):
+        entered.set()
+        assert release.wait(10)
+        return actual(self,plan)
+    monkeypatch.setattr(module.DocumentWorkflow,'execute',blocked)
+    try:
+        preview=review_jobs(commander,[editing(data)])
+        assert preview['jobs'][0]['status']=='ready'
+        applied=commander.apply_document_workflow(
+            preview['plan_id'],preview['review_sha256'],preview['jobs'])
+        assert entered.wait(5)
+        with store.store.locked():
+            state=store.load()
+            state['tasks'][lease['id']]['expires_at']=store.clock()-1
+            store.save(state)
+    finally:
+        assignment.reset(marker)
+        release.set()
+
+    receipt=wait_plan(commander,commander.get_document_workflow(applied['plan_id']))
+    assert receipt['status']=='partial_failure'
+    assert receipt['jobs'][0]['status']=='failed'
+    assert not (commander.workspace/'revised.docx').exists()
