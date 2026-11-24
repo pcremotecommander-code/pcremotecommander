@@ -1410,16 +1410,31 @@ class ControlCommander(PortableCommander):
                     except Exception:
                         pass
 
-        if already_closed:
-            return
-        if self._foreground_parent is not None:
-            self._foreground_parent.close()
-        from .cli import Console
-        Console(self).close()
-        try:
-            self._browser_executor.submit(self._close_browser).result(timeout=15)
-        finally:
-            self._browser_executor.shutdown(wait=False, cancel_futures=True)
+        remaining = []
+        with self._lock:
+            for session_id in session_ids:
+                entry = self._sessions.get(session_id)
+                if entry is not None and (
+                    not entry['done'].is_set() or entry['process'].poll() is None
+                ):
+                    remaining.append(session_id)
+
+        if not already_closed:
+            if self._foreground_parent is not None:
+                self._foreground_parent.close()
+            from .cli import Console
+            Console(self).close()
+            try:
+                self._browser_executor.submit(self._close_browser).result(timeout=15)
+            finally:
+                self._browser_executor.shutdown(wait=False, cancel_futures=True)
+
+        if remaining:
+            raise PermissionDenied(
+                f'Control was disabled, but {len(remaining)} owned command session(s) '
+                'have not fully exited. Their reservations remain held; retry local shutdown '
+                'and inspect jan_task_state before starting new workspace operations.'
+            )
 
 
 CONTROL_METHODS = {'jan_inspect_development':'inspect_development','jan_preview_development_change':'preview_development_change','jan_apply_development_change':'apply_development_change','jan_get_development_change':'get_development_change','jan_inspect_desktop_controls':'inspect_desktop_controls','jan_interact_desktop_control':'interact_desktop_control','jan_inspect_document_pdf':'inspect_document_pdf','jan_browser_workflow':'browser_workflow', 'jan_run_command':'run_command', 'jan_start_process':'start_process',
