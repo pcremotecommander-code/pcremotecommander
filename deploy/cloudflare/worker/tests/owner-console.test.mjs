@@ -22,7 +22,7 @@ test('Security and Backups is integrated into the MFA-protected owner admin navi
   const response=await f.request('/admin/security-backups');
   assert.equal(response.status,200);
   const html=await response.text();
-  assert.match(html,/Security &amp; backups/);
+  assert.match(html,/Security (?:&amp;|&#38;) backups/);
   assert.match(html,/Prototype ready/);
   assert.match(html,/Not enabled/);
   assert.match(html,/Not connected/);
