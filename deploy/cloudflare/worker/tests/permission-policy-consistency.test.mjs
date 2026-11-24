@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { actionAccess, requiresActionReview } from '../src/action_access.ts';
 import { CONTROL_CATALOG_READ_TOOLS } from '../src/relay_protocol.ts';
 
-test('every gateway read-only tool uses the same read approval route', () => {
+test('read-only actions stay separate from control-catalog routing', () => {
   const readOnlyTools = [
     'read_multiple_files',
     'list_workspace_entries',
@@ -17,8 +17,8 @@ test('every gateway read-only tool uses the same read approval route', () => {
 
   for (const name of readOnlyTools) {
     assert.equal(actionAccess(name), 'read', name);
-    assert.equal(CONTROL_CATALOG_READ_TOOLS.has(name), true,
-      name + ' must not be routed through write approval');
+    assert.equal(CONTROL_CATALOG_READ_TOOLS.has(name), false,
+      name + ' is a read action, not a control-catalog operation');
   }
 });
 
@@ -31,7 +31,7 @@ test('unknown tools remain writes and retain high-risk warning behavior', () => 
 
 test('approval routing, access type and dashboard warning severity stay independent', () => {
   assert.equal(actionAccess('inspect_desktop_controls'), 'read');
-  assert.equal(CONTROL_CATALOG_READ_TOOLS.has('inspect_desktop_controls'), true);
+  assert.equal(CONTROL_CATALOG_READ_TOOLS.has('inspect_desktop_controls'), false);
   assert.equal(requiresActionReview('inspect_desktop_controls'), false);
 
   assert.equal(actionAccess('create_text_file'), 'write');
