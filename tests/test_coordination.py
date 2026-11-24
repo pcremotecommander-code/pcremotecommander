@@ -1870,6 +1870,7 @@ def test_task_state_exposes_sanitized_unresolved_operation_ids_for_recovery(pc):
             'kind':'write_text',
             'resources':['file:private/secret-document.docx'],
             'task_id':None,
+            'owner':{'supervisor_pid':4567,'child_pid':4568},
             'started_at':store.clock(),
         }
         store.save(data)
@@ -1881,6 +1882,8 @@ def test_task_state_exposes_sanitized_unresolved_operation_ids_for_recovery(pc):
         'kind':'write_text',
         'task_id':None,
         'resource_scopes':['files'],
+        'supervisor_pid':4567,
+        'child_pid':4568,
         'started_at':state['operations'][0]['started_at'],
     }]
     assert 'secret-document.docx' not in repr(state)
