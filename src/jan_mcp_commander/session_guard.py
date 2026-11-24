@@ -537,17 +537,27 @@ def supervise_linux_guardian(config, lock_fd):
         guardian.stdin.flush()
 
         import select
-        readable, _, _ = select.select([guardian.stdout], [], [], 15)
-        if not readable:
-            raise TimeoutError("Linux command guardian did not become ready")
-        ready_line = guardian.stdout.readline(4096)
-        if not ready_line:
+        output_fd = guardian.stdout.fileno()
+        ready_deadline = time.monotonic() + 15
+        ready_line = bytearray()
+        while not ready_line.endswith(b"\\n") and len(ready_line) < 4096:
+            remaining = ready_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Linux command guardian did not become ready")
+            readable, _, _ = select.select([output_fd], [], [], remaining)
+            if not readable:
+                raise TimeoutError("Linux command guardian did not become ready")
+            packet = os.read(output_fd, 1)
+            if not packet:
+                break
+            ready_line.extend(packet)
+        if not ready_line.endswith(b"\\n"):
             diagnostic = guardian.stderr.read(4096) if guardian.poll() is not None else b""
             raise RuntimeError(
                 "Linux command guardian exited before starting the command: "
                 + diagnostic.decode("utf-8", "replace")[:240]
             )
-        ready = json.loads(ready_line.decode("utf-8"))
+        ready = json.loads(bytes(ready_line).decode("utf-8"))
         if ready.get("ready") is not True or type(ready.get("pid")) is not int:
             raise RuntimeError("Linux command guardian returned an invalid handshake")
         sys.stdout.write(json.dumps(ready) + "\n")
@@ -565,10 +575,10 @@ def supervise_linux_guardian(config, lock_fd):
             if pipe_closed:
                 time.sleep(0.02)
                 continue
-            readable, _, _ = select.select([guardian.stdout], [], [], 0.05)
+            readable, _, _ = select.select([output_fd], [], [], 0.05)
             if not readable:
                 continue
-            packet = guardian.stdout.read1(4096)
+            packet = os.read(output_fd, 4096)
             if packet:
                 sys.stdout.buffer.write(packet)
                 sys.stdout.buffer.flush()
@@ -580,7 +590,10 @@ def supervise_linux_guardian(config, lock_fd):
         # adopted by this supervisor (also a subreaper) and must be reaped here.
         descendants_terminated = _terminate_linux_descendants()
         while True:
-            packet = guardian.stdout.read1(4096)
+            readable, _, _ = select.select([output_fd], [], [], 0)
+            if not readable:
+                break
+            packet = os.read(output_fd, 4096)
             if not packet:
                 break
             sys.stdout.buffer.write(packet)
