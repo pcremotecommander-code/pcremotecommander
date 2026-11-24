@@ -562,7 +562,7 @@ class Coordination:
         return any(entry.get('task_id') == task_id and not entry['done'].is_set() for entry in self.commander._sessions.values())
 
     @contextmanager
-    def guard(self, resources, *, allow_active_sessions=False, defer_task_scope=False):
+    def guard(self, resources, *, allow_active_sessions=False):
         targets = sorted(set(resource(item) for item in resources))
         outer_resources = self.depth.get()
         if outer_resources is not None:
@@ -570,7 +570,7 @@ class Coordination:
             # nested calls. The outer reservation is an additional boundary,
             # not a substitute for the assigned task's narrower permissions.
             current = assignment.get()
-            if current and not defer_task_scope:
+            if current:
                 with self.store.locked():
                     data = self.load()
                     self.expire(data)
@@ -609,7 +609,7 @@ class Coordination:
                     if own is None:
                         raise CoordinationError('TASK_NOT_FOUND', 'Task not found; call list_tasks.')
                     self.validate(own, current[1])
-                    if not defer_task_scope and any(
+                    if any(
                         not any(covers(r, target) for r in own['resources']) for target in targets
                     ):
                         raise CoordinationError('TASK_SCOPE_DENIED', 'This operation exceeds the assignment. Finish and claim an appropriate reservation before continuing.')
@@ -676,21 +676,6 @@ class Coordination:
                         )
                         self.save(data)
                 raise
-            except OperationNotApplied:
-                # Explicitly typed precondition failures are guaranteed to
-                # occur before a mutation or external dispatch. Retain their
-                # original public error while closing the reservation cleanly.
-                with self.store.locked():
-                    data = self.load()
-                    record = data.get('operations', {}).get(operation_id)
-                    if record and record.get('state') == 'active':
-                        record.update(
-                            state='failed',
-                            note='A verified precondition rejected the operation before mutation.',
-                            finished_at=self.clock(),
-                        )
-                        self.save(data)
-                raise
             except CoordinationError as exc:
                 # Coordination rejections are pre-dispatch by contract. The
                 # browser workflow uses WORKFLOW_OUTCOME_UNKNOWN only when a
@@ -749,9 +734,6 @@ def coordinated(kind, *paths):
             with coordinator(self).guard(
                 targets,
                 allow_active_sessions=method.__name__ == 'process_input',
-                # Document preview only schedules work. The worker rechecks
-                # each source/output path under its own reservation before IO.
-                defer_task_scope=method.__name__ == 'preview_document_workflow',
             ):
                 result = method(self, *args, **kwargs)
                 if assignment.get() and method.__name__ in {'start_process', 'start_program', 'prepare_media'} and isinstance(result, dict):
