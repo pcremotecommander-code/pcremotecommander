@@ -2069,6 +2069,8 @@ def test_lease_cannot_be_renewed_at_or_after_expiry_boundary(pc):
 
 
 def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
+    from types import SimpleNamespace
+
     store = coordinator(pc)
     lease = claim(store, 'session registry race', ['file:registry-race.txt'])
 
@@ -2076,6 +2078,7 @@ def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.mutate_during_iteration = False
+            self.mutation_number = 0
 
         def values(self):
             iterator = super().values()
@@ -2084,19 +2087,20 @@ def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
                 return
             self.mutate_during_iteration = False
             yield next(iterator)
-            self['racing-session'] = {
-                'profile': 'operator_command',
-                'task_id': lease['id'],
-                'done': __import__('threading').Event(),
+            self.mutation_number += 1
+            self[f'racing-session-{self.mutation_number}'] = {
+                'profile': 'disk_usage',
+                'task_id': 'unrelated-task',
+                'process': SimpleNamespace(poll=lambda: 0),
             }
             yield from iterator
 
     original = pc._sessions
     sessions = MutatingSessions({
         'initial-session': {
-            'profile': 'operator_command',
-            'task_id': lease['id'],
-            'done': __import__('threading').Event(),
+            'profile': 'disk_usage',
+            'task_id': 'unrelated-task',
+            'process': SimpleNamespace(poll=lambda: 0),
         }
     })
     pc._sessions = sessions
@@ -2104,12 +2108,20 @@ def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
         sessions.mutate_during_iteration = True
         assert store.running(lease['id']) is True
 
+        waiting = {
+            'status': 'waiting',
+            'queue_order': 1,
+            'resources': ['file:queued.txt'],
+            'expires_at': 2000,
+            'lease_token': 'synthetic-token',
+        }
         sessions.mutate_during_iteration = True
-        assert store.promote({'tasks': {}}) is False
+        assert store.promote({'tasks': {'waiting': waiting}, 'operations': {}}) is False
+        assert waiting['status'] == 'waiting'
 
         sessions.mutate_during_iteration = True
         with pytest.raises(CoordinationError) as error:
-            with store.guard(['file:registry-race.txt']):
+            with store.guard(['file:unreserved-other.txt']):
                 pytest.fail('workspace operation entered during an unstable session snapshot')
         assert error.value.code == 'TASK_CONFLICT'
     finally:
