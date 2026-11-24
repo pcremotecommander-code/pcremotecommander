@@ -14,7 +14,7 @@ from contextvars import copy_context
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .coordination import CoordinationError, coordinator, resource
+from .coordination import CoordinationError, assignment, coordinator, resource
 from .environment import runtime_environment
 from .privacy import assert_public_text
 from .safe_fs import parts
@@ -182,6 +182,18 @@ class DocumentWorkflow:
         if not isinstance(plan_id,str) or not re.fullmatch('[a-f0-9]{32}',plan_id): raise ValueError('Invalid document plan ID')
         with self.store.locked(): plan=self.load().get(plan_id)
         if not plan: raise ValueError('Document plan not found for this workspace')
+        current=assignment.get()
+        if current:
+            if plan.get('task_id') != current[0]:
+                raise CoordinationError('TASK_SCOPE_DENIED','Document review belongs to another task assignment.')
+            tasks=coordinator(self.commander)
+            with tasks.store.locked():
+                data=tasks.load()
+                tasks.expire(data)
+                task=data['tasks'].get(current[0])
+                if task is None:
+                    raise CoordinationError('TASK_NOT_FOUND','Task not found; call list_tasks.')
+                tasks.validate(task,current[1])
         value=self.public(plan)
         if value['status'] in {'preparing','applying'}:
             with self.run_lock:event=self.running.get(plan_id)
@@ -203,7 +215,8 @@ class DocumentWorkflow:
                 if target in destinations: raise ValueError('Duplicate output paths in document batch')
                 destinations.add(target)
         identifier=uuid.uuid4().hex
-        plan={'plan_id':identifier,'status':'preparing','expires_at':time.time()+900,'jobs':[],'prepared':[],'review_sha256':''}
+        current=assignment.get()
+        plan={'plan_id':identifier,'task_id':current[0] if current else None,'status':'preparing','expires_at':time.time()+900,'jobs':[],'prepared':[],'review_sha256':''}
         with self.store.locked():
             plans=self.load()
             plans={k:v for k,v in plans.items() if v['status']=='applying' or v['expires_at']>time.time()}
