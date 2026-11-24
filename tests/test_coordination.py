@@ -1766,3 +1766,22 @@ def test_task_owned_session_access_requires_unexpired_lease(pc):
             assigned(lease,pc.list_sessions)
     finally:
         pc._sessions.pop('expired-owner-session',None)
+
+def test_read_only_uia_precondition_does_not_leave_uncertain_ui_reservation(pc,monkeypatch):
+    from jan_mcp_commander.windows_uia import UIAutomationError
+
+    store=coordinator(pc)
+    monkeypatch.setattr(pc,'_foreground_window',lambda:123)
+    def changed(*args,**kwargs):
+        raise UIAutomationError('UIA_TARGET_CHANGED','Foreground changed before inspection completed.')
+    monkeypatch.setattr('jan_mcp_commander.windows_uia.query',changed)
+
+    for _ in range(2):
+        with pytest.raises(PermissionDenied,match='Foreground changed'):
+            pc.inspect_desktop_controls()
+
+    with store.store.locked():
+        records=[record for record in store.load()['operations'].values()
+                 if record.get('kind')=='inspect_desktop_controls']
+    assert len(records)==2
+    assert all(record['state']=='failed' for record in records)
