@@ -104,10 +104,11 @@ class ControlCommander(PortableCommander):
     def preview_document_workflow(self, jobs):
         self._check('files')
         self._audit('document_preview', True, 'bounded document review')
-        from .document_workflow import DocumentCapacityError
         try:
             return self._documents().preview(jobs)
-        except DocumentCapacityError as exc:
+        except ValueError as exc:
+            # Document preview validation and capacity checks happen before
+            # worker dispatch; no document output can have been written.
             raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('workspace')
@@ -371,6 +372,8 @@ class ControlCommander(PortableCommander):
                 self._tree.unlink_file(path)
         except OperationNotApplied:
             raise
+        except FileNotFoundError as exc:
+            raise OperationNotApplied('Delete target was not found') from exc
         except (OSError, ValueError) as exc:
             raise PermissionDenied('Delete denied') from exc
         self._audit('delete_text', True, f'{path};backup={backup_id}')
@@ -412,6 +415,8 @@ class ControlCommander(PortableCommander):
                     raise
         except OperationNotApplied:
             raise
+        except FileNotFoundError as exc:
+            raise OperationNotApplied('Move source was not found') from exc
         except (OSError, ValueError) as exc:
             raise PermissionDenied('Move denied') from exc
         self._audit('move_text', True, f'{source};backup={backup_id}')
