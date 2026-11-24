@@ -2066,3 +2066,51 @@ def test_lease_cannot_be_renewed_at_or_after_expiry_boundary(pc):
     with pytest.raises(CoordinationError):
         store.task('renew', task_id=lease['id'],
                    lease_token=lease['lease_token'])
+
+
+def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
+    store = coordinator(pc)
+    lease = claim(store, 'session registry race', ['file:registry-race.txt'])
+
+    class MutatingSessions(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.mutate_during_iteration = False
+
+        def values(self):
+            iterator = super().values()
+            if not self.mutate_during_iteration:
+                yield from iterator
+                return
+            self.mutate_during_iteration = False
+            yield next(iterator)
+            self['racing-session'] = {
+                'profile': 'operator_command',
+                'task_id': lease['id'],
+                'done': __import__('threading').Event(),
+            }
+            yield from iterator
+
+    original = pc._sessions
+    sessions = MutatingSessions({
+        'initial-session': {
+            'profile': 'operator_command',
+            'task_id': lease['id'],
+            'done': __import__('threading').Event(),
+        }
+    })
+    pc._sessions = sessions
+    try:
+        sessions.mutate_during_iteration = True
+        assert store.running(lease['id']) is True
+
+        sessions.mutate_during_iteration = True
+        assert store.promote({'tasks': {}}) is False
+
+        sessions.mutate_during_iteration = True
+        with pytest.raises(CoordinationError) as error:
+            with store.guard(['file:registry-race.txt']):
+                pytest.fail('workspace operation entered during an unstable session snapshot')
+        assert error.value.code == 'TASK_CONFLICT'
+    finally:
+        pc._sessions = original
