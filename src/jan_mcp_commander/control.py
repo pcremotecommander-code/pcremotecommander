@@ -104,7 +104,11 @@ class ControlCommander(PortableCommander):
     def preview_document_workflow(self, jobs):
         self._check('files')
         self._audit('document_preview', True, 'bounded document review')
-        return self._documents().preview(jobs)
+        from .document_workflow import DocumentCapacityError
+        try:
+            return self._documents().preview(jobs)
+        except DocumentCapacityError as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('workspace')
     def apply_document_workflow(self, plan_id, review_sha256, review):
@@ -349,17 +353,19 @@ class ControlCommander(PortableCommander):
         from .safe_fs import unsupported_content
         self._check('files')
         if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
-            raise PermissionDenied('Expected SHA256 required')
+            raise OperationNotApplied('Expected SHA256 required')
         self._audit('delete_intent', True, str(path))
         try:
             with self._lock, self._store.locked():
                 data = self._tree.read(path)
                 if unsupported_content(data):
-                    raise PermissionDenied('Binary or private key data denied')
+                    raise OperationNotApplied('Binary or private key data denied')
                 if hashlib.sha256(data).hexdigest() != expected_sha256:
-                    raise PermissionDenied('File changed; read it again before modifying')
+                    raise OperationNotApplied('File changed; read it again before modifying')
                 backup_id = self._store.backup(path, data)
                 self._tree.unlink_file(path)
+        except OperationNotApplied:
+            raise
         except (OSError, ValueError) as exc:
             raise PermissionDenied('Delete denied') from exc
         self._audit('delete_text', True, f'{path};backup={backup_id}')
@@ -871,12 +877,20 @@ class ControlCommander(PortableCommander):
     def browser_action(self, action, target='', text=''):
         self._check('browser')
         if action not in {'open', 'new_tab', 'tabs', 'select_tab', 'close_tab', 'back', 'forward', 'reload', 'snapshot', 'click', 'fill', 'press', 'select', 'check', 'screenshot', 'close'}:
-            raise PermissionDenied('Unknown browser action')
+            raise OperationNotApplied('Unknown browser action')
         if not isinstance(target, str) or not isinstance(text, str) or len(target) > 2048 or len(text) > 4096:
-            raise PermissionDenied('Browser input exceeds limit')
+            raise OperationNotApplied('Browser input exceeds limit')
         from .privacy import assert_public_text
-        assert_public_text(target)
-        assert_public_text(text)
+        try:
+            assert_public_text(target)
+            assert_public_text(text)
+        except ValueError as exc:
+            raise OperationNotApplied(str(exc)) from exc
+        if action in {'open', 'new_tab'} and not (action == 'new_tab' and not target):
+            candidate = 'about:blank' if action == 'new_tab' and not target else target
+            parsed = urlsplit(candidate)
+            if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+                raise OperationNotApplied('Open an http(s) URL without embedded credentials')
         # Playwright sync objects must remain on their creating thread.
         return self._browser_executor.submit(self._browser_action, action, target, text).result(timeout=18)
 
@@ -1170,17 +1184,17 @@ class ControlCommander(PortableCommander):
         if sys.platform.startswith('linux') and (os.environ.get('XDG_SESSION_TYPE') != 'x11' or not os.environ.get('DISPLAY')):
             raise PermissionDenied('Linux desktop input requires an X11 session. Wayland input is unavailable.')
         if action not in {'screenshot', 'click', 'right_click', 'double_click', 'drag', 'move', 'scroll', 'type', 'hotkey'}:
-            raise PermissionDenied('Unknown desktop action')
+            raise OperationNotApplied('Unknown desktop action')
         if type(x) is not int or type(y) is not int or type(amount) is not int or not -20 <= amount <= 20:
-            raise PermissionDenied('Invalid desktop coordinates or scroll amount')
+            raise OperationNotApplied('Invalid desktop coordinates or scroll amount')
         text_limit=1024 if os.name=='nt' else 4096
         if (not isinstance(text, str) or len(text) + (sum(ord(char) > 0xffff for char in text) if os.name == 'nt' else 0) > text_limit or
                 (text and (not text.isprintable() or (os.name != 'nt' and not text.isascii())))):
-            raise PermissionDenied(f'Desktop typing accepts printable text (ASCII on non-Windows), up to {text_limit} characters per step')
+            raise OperationNotApplied(f'Desktop typing accepts printable text (ASCII on non-Windows), up to {text_limit} characters per step')
         if action == 'type' and not text:
-            raise PermissionDenied('Desktop typing requires nonempty text')
+            raise OperationNotApplied('Desktop typing requires nonempty text')
         if keys is not None and (not isinstance(keys, list) or len(keys) > 4 or (action == 'hotkey' and not keys) or any(not isinstance(k, str) for k in keys)):
-            raise PermissionDenied('Use one to four named keys')
+            raise OperationNotApplied('Use one to four named keys')
         if keys is not None:
             keys=[key.lower() for key in keys]
         try:
