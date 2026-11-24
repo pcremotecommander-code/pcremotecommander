@@ -699,11 +699,10 @@ class ControlCommander(PortableCommander):
                                         group_alive = True
                                 if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
-                                        # A naturally exited command is complete
-                                        # even when its exit code is nonzero. The
-                                        # code is retained in the receipt; only
-                                        # externally terminated runs stay review-required.
-                                        operation_id, success=not getattr(supervisor, 'pcrc_terminated', False),
+                                        # A nonzero exit may follow partial external
+                                        # effects; require explicit review rather than
+                                        # treating it as a clean completion.
+                                        operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     supervisor.pcrc_finalized = True
@@ -987,10 +986,10 @@ class ControlCommander(PortableCommander):
         elif action in {'click', 'fill', 'press', 'select', 'check'}:
             locator = page.locator(target)
             if locator.count() != 1:
-                raise PermissionDenied('Selector must identify exactly one element')
+                raise OperationNotApplied('Selector must identify exactly one element')
             # Credentials/OTP are entered manually in the visible browser.
             if locator.evaluate("e => e.matches('input[type=password i],[autocomplete*=one-time-code i],[autocomplete*=current-password i],[autocomplete*=new-password i],[autocomplete*=cc- i]')"):
-                raise PermissionDenied('Enter credentials locally in the browser')
+                raise OperationNotApplied('Enter credentials locally in the browser')
             if action == 'click':
                 locator.click()
             elif action == 'fill':
@@ -1000,7 +999,7 @@ class ControlCommander(PortableCommander):
             elif action == 'select':
                 locator.select_option(value=text)
             else:
-                if text not in {'true','false'}: raise PermissionDenied('check text must be true or false')
+                if text not in {'true','false'}: raise OperationNotApplied('check text must be true or false')
                 locator.set_checked(text=='true')
         elif action == 'screenshot':
             from .privacy import assert_public_text
