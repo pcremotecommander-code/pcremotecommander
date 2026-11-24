@@ -16,7 +16,8 @@ import {ownerConsole} from '../src/owner_console.ts';
 test('Security and Backups is integrated into the MFA-protected owner admin navigation',async()=>{
   const f=await ownerFixture();
   const locked=await f.request('/admin/security-backups');
-  assert.ok([302,403].includes(locked.status),'backup page must remain behind owner verification');
+  assert.equal(locked.status,303,'unverified owner must be redirected to authenticator verification');
+  assert.match(locked.headers.get('Location')??'',/\/admin\/security$/);
   await unlockOwner(f);
   const response=await f.request('/admin/security-backups');
   assert.equal(response.status,200);
