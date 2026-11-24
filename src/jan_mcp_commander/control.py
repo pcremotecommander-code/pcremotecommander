@@ -649,8 +649,12 @@ class ControlCommander(PortableCommander):
                 terminate_windows_job_and_wait,
             )
             store = coordinator(self).store
-            lock_resource = 'session:' + uuid.uuid4().hex
-            owner_lock_resource = 'session-owner:' + uuid.uuid4().hex
+            # At most one detached command may own the workspace reservation.
+            # Stable per-workspace identifiers reuse the handoff lock files
+            # instead of creating two permanent lock files for every command.
+            lock_identity = store.context.hex()[:32]
+            lock_resource = 'session:' + lock_identity
+            owner_lock_resource = 'session-owner:' + lock_identity
             owner_ready = threading.Event()
             owner_release = threading.Event()
             owner_errors = []
