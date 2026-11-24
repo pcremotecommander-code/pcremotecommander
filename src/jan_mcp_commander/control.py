@@ -1439,7 +1439,7 @@ class ControlCommander(PortableCommander):
 
         if remaining:
             raise PermissionDenied(
-                f'Control was disabled, but {len(remaining)} owned command session(s) '
+                f'Control was disabled, but {len(remaining)} owned session(s) '
                 'have not fully exited. Their reservations remain held; retry local shutdown '
                 'and inspect jan_task_state before starting new workspace operations.'
             )
