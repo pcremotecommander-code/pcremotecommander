@@ -25,6 +25,10 @@ class CoordinationError(PermissionDenied):
         self.code = code
 
 
+class SafeCoordinationError(CoordinationError, OperationNotApplied):
+    """A coordination rejection proven to occur before external work begins."""
+
+
 def resource(value):
     if value in {'workspace', 'ui'}:
         return value
