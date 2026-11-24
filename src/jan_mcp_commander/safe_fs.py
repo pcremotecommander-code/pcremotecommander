@@ -25,7 +25,12 @@ def parts(name, internal=False):
     assert_public_text(name)
     if name == '.':
         return ()
-    items = (name.replace('\\', '/') if os.name == 'nt' else name).split('/')
+    # Accept a conventional trailing directory separator without accepting
+    # empty, repeated, dot or parent components inside the path.
+    name = name.rstrip('/\\\\')
+    if not name:
+        raise ValueError('Invalid relative path')
+    items = (name.replace('\\\\', '/') if os.name == 'nt' else name).split('/')
     # Reject DOS aliases instead of resolving them through potentially unsafe links.
     if os.name == 'nt' and any('~' in p for p in items):
         raise ValueError('Windows short-name paths denied; use the full filename without a tilde')
