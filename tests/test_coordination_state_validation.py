@@ -170,6 +170,12 @@ def test_unsupported_run_status_returns_safe_state_error(store, status):
             "status": "published", "expected_url": "http://example.test/",
             "expected_text": "Done", "version": 1,
         },
+        {
+            "id": "workflow-1", "title": "Synthetic",
+            "steps": [{"action": ["click"], "target": "#done"}, {"action": "click", "target": "#done", "before_url": "http://example.test/"}],
+            "status": "published", "expected_url": "http://example.test/",
+            "expected_text": "Done", "version": 1,
+        },
     ],
 )
 def test_malformed_run_workflow_snapshot_returns_safe_state_error(store, workflow):
