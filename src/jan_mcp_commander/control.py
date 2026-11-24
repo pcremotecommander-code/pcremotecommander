@@ -1401,23 +1401,29 @@ class ControlCommander(PortableCommander):
 
         remaining = []
         for session_id, entry in session_entries.items():
+            process = entry.get('process') if isinstance(entry, dict) else None
+            if process is None or not callable(getattr(process, 'poll', None)) or not callable(getattr(process, 'wait', None)):
+                # Malformed or synthetic entries cannot be terminated safely.
+                # Keep them visible and fail shutdown rather than assuming exit.
+                remaining.append(session_id)
+                continue
             try:
                 PortableCommander.stop_session(self, session_id)
             except Exception:
                 # Do not hide a failed cleanup by deleting the session. The
                 # collector/finalizer keeps its receipt and locks fail closed.
                 try:
-                    self._terminate(entry['process'])
+                    self._terminate(process)
                 except Exception:
                     pass
             try:
-                entry['process'].wait(timeout=10)
+                process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
             done_event = entry.get('done')
             if done_event is not None:
                 done_event.wait(5)
-            process_exited = entry['process'].poll() is not None
+            process_exited = process.poll() is not None
             collector_finished = done_event is None or done_event.is_set()
             if not process_exited or not collector_finished:
                 remaining.append(session_id)
