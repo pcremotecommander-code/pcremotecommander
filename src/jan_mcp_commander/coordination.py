@@ -739,7 +739,7 @@ def coordinated(kind, *paths):
                 allow_active_sessions=method.__name__ == 'process_input',
                 # Document preview schedules work only. Its worker checks each
                 # source and destination path before reading any file.
-                defer_task_scope=method.__name__ == 'preview_document_workflow',
+                defer_task_scope=method.__name__ in {'preview_document_workflow', 'apply_document_workflow'},
                 operation_kind=method.__name__,
             ):
                 result = method(self, *args, **kwargs)
