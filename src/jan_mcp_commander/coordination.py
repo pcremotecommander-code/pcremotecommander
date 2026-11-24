@@ -641,7 +641,7 @@ class Coordination:
                     if any(overlaps(a, b) for a in existing_resources for b in targets):
                         if existing.get('kind') == 'browser_workflow' and existing.get('state') == 'needs_review':
                             raise CoordinationError('TASK_CONFLICT', 'A prior run has an uncertain browser outcome. Inspect the page and workflow receipt before starting another run.')
-                        raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying.')
+                        raise CoordinationError('TASK_CONFLICT', 'Resource is held by another or uncertain operation. Inspect its result before retrying; do not replay automatically.')
                 operations = data.setdefault('operations', {})
                 if len(operations) >= MAX_OPERATION_RECORDS:
                     completed = sorted(
