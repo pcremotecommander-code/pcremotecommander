@@ -29,14 +29,18 @@ def test_completed_jobs_not_counted_as_running_and_history_bounded(cmd):
     # Arbitrary shell commands reserve the whole workspace. A second command
     # must wait until the first is stopped; allowing four concurrent commands
     # would reintroduce uncoordinated workspace writes.
-    active=cmd.start_program(sys.executable,['-I','-c','import time;time.sleep(20)'],timeout_seconds=20)
+    release=cmd.workspace/'.release-owned-command'
+    code=("import os,time; path="+repr(str(release))+"; deadline=time.monotonic()+10; "
+          "exec("+repr("while not os.path.exists(path) and time.monotonic()<deadline: time.sleep(0.01)")+")")
+    active=cmd.start_program(sys.executable,['-I','-c',code],timeout_seconds=20)
     with pytest.raises(ValueError,match='owned command is still running'):
         cmd.start_program(sys.executable,['-V'])
     assert not cmd._sessions[active['session_id']]['done'].is_set()
-    cmd.stop_session(active['session_id'])
 
-    # Once the owned command has fully stopped, the workspace reservation is
-    # released and another command can start normally.
+    # Let the command finish naturally so its workspace reservation is cleanly
+    # completed rather than requiring explicit review after a forced stop.
+    release.write_text('release')
+    assert cmd._sessions[active['session_id']]['done'].wait(5)
     next_job=cmd.start_program(sys.executable,['-I','-c','print(2)'],timeout_seconds=5)
     assert cmd._sessions[next_job['session_id']]['done'].wait(5)
 
