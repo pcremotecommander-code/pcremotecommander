@@ -94,18 +94,64 @@ class Coordination:
                 'Private coordination state has an invalid operations container.',
             )
 
+        valid_run_statuses = {'ready', 'unknown', 'passed', 'failed', 'abandoned_after_review'}
+        valid_run_actions = {'open', 'click', 'fill', 'check', 'select'}
         for identifier, run in data['runs'].items():
-            if (
+            workflow = run.get('workflow') if isinstance(run, dict) else None
+            steps = workflow.get('steps') if isinstance(workflow, dict) else None
+            malformed = (
                 not isinstance(identifier, str)
                 or not isinstance(run, dict)
+                or run.get('id') != identifier
                 or not isinstance(run.get('task_id'), str)
                 or not run.get('task_id')
-                or not isinstance(run.get('status'), str)
-                or not run.get('status')
-            ):
+                or run.get('status') not in valid_run_statuses
+                or not isinstance(workflow, dict)
+                or not isinstance(workflow.get('id'), str)
+                or not workflow.get('id')
+                or not isinstance(workflow.get('title'), str)
+                or not 1 <= len(workflow.get('title', '')) <= 160
+                or workflow.get('status') != 'published'
+                or not isinstance(workflow.get('expected_url'), str)
+                or not workflow.get('expected_url')
+                or not isinstance(workflow.get('expected_text'), str)
+                or not 1 <= len(workflow.get('expected_text', '')) <= 200
+                or type(workflow.get('version')) is not int
+                or workflow.get('version') < 1
+                or not isinstance(steps, list)
+                or not 2 <= len(steps) <= 30
+                or type(run.get('next_step')) is not int
+                or not 0 <= run.get('next_step', -1) <= len(steps or [])
+            )
+            if not malformed:
+                for index, step in enumerate(steps):
+                    if (
+                        not isinstance(step, dict)
+                        or step.get('action') not in valid_run_actions
+                        or not isinstance(step.get('target'), str)
+                        or not 1 <= len(step.get('target', '')) <= 512
+                        or (index == 0 and step.get('action') != 'open')
+                        or (index > 0 and (
+                            step.get('action') == 'open'
+                            or not isinstance(step.get('before_url'), str)
+                            or not step.get('before_url')
+                        ))
+                        or (step.get('action') not in {'open', 'click'} and (
+                            not isinstance(step.get('input'), str) or not step.get('input')
+                        ))
+                    ):
+                        malformed = True
+                        break
+            if not malformed:
+                status, next_step = run['status'], run['next_step']
+                malformed = (
+                    status in {'ready', 'unknown'} and next_step >= len(steps)
+                    or status in {'passed', 'failed'} and next_step != len(steps)
+                )
+            if malformed:
                 raise CoordinationError(
                     'TASK_STATE_INVALID',
-                    'A run record in private coordination state is malformed. Inspect it locally; no reservations were released.',
+                    'A browser workflow run in private coordination state is malformed. Inspect it locally; no reservations were released.',
                 )
 
         valid_statuses = {'queued', 'waiting', 'active', 'needs_review', 'completed', 'failed'}
