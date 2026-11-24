@@ -95,6 +95,20 @@ export async function ownerConsole(request:Request,env:Env,owner:Owner|null,stor
   if(!security.verified)return new Response(null,{status:303,headers:{Location:config(env).publicOrigin+'/admin/security','Cache-Control':'no-store'}});
   let fields:URLSearchParams|null=null;
   try{if(request.method==='POST')fields=await form(request.clone(),env,owner);}catch{return failure(403,'Owner form denied');}
+  if(path==='/admin/security-backups'&&request.method==='GET'){
+    if(url.search)return failure(400,'Unexpected dashboard parameters');
+    const metric=(label:string,value:string,help:string)=>'<section class="panel owner-metric"><p class="metric-label">'+escaped(label)+'</p><strong>'+escaped(value)+'</strong><p class="footnote">'+escaped(help)+'</p></section>';
+    const prototype='<p>The private backup-engine prototype has a scheduler, encrypted backup verification, remote-storage adapter and a read-only local owner dashboard. Its automated test workflow has passed.</p><p><a class="button neutral" href="https://github.com/pcremotecommander-code/pcrc-security-backup/tree/backup-engine-prototype" target="_blank" rel="noopener noreferrer">Open private backup project</a></p>';
+    const boundary='<p class="notice" role="status">The backup prototype currently runs separately from the PCRC Cloudflare Worker. This page does not yet receive live scheduler or storage-provider telemetry. Values are deliberately shown as not connected rather than guessed.</p>';
+    return page(heading('Security & backups','Private overview of PCRC backup readiness and production protection.')+boundary+'<div class="owner-grid">'+
+      metric('Backup engine','Prototype ready','Private repository; automated prototype tests pass')+
+      metric('Production scheduler','Not enabled','No recurring production job is installed')+
+      metric('Independent storage','Not connected','No production storage credentials or bucket configured')+
+      metric('Latest production backup','Not available','No production backup has been run through this system')+
+      metric('Restore verification','Pending','Provider-backed clean-environment restore drill is required')+
+      metric('Production changes','None','This integration has not changed production configuration')+
+      '</div><div class="owner-columns">'+panel('Private backup engine',prototype)+panel('Owner access','<p>This page is shown only after the existing owner GitHub sign-in and authenticator verification checks have passed.</p><p>Backup keys, provider credentials and customer data are never displayed here.</p>')+'</div><div style="margin-top:20px">'+panel('Next integration gate','<ol><li>Build a signed, allowlisted status bridge from the backup runner to the owner Worker.</li><li>Authenticate the runner independently; reject replayed or stale status updates.</li><li>Display last successful run, failures, remote object counts, retention verification and cost only after provider evidence is available.</li><li>Complete a clean-environment restore drill before enabling production scheduling.</li></ol><p class="footnote">No backup, restore, delete, credential rotation or production action is available from this page.</p>')+'</div>','Security & backups',owner,'backups');
+  }
   if(path==='/admin/analytics/refresh'&&fields){
     const job=await store('/owner-data/begin',{});
     const directory=await store('/directory/list',{...(job.after?{after:job.after}:{})});
