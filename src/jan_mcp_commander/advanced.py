@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from .core import Commander, OperationNotApplied, PermissionDenied, COMMAND_PROFILES, MAX_READ_BYTES
+from .core import Commander, OperationNotApplied, OperationNotAppliedFileExists, PermissionDenied, COMMAND_PROFILES, MAX_READ_BYTES
 from .safe_fs import parts, unsupported_content
 
 MAX_WRITE = 65536
@@ -192,39 +192,49 @@ class AdvancedCommander(Commander):
 
     def _write_binary(self, path, data, *, overwrite=False, expected_sha256=None, deadline=None):
         """Internal media writer; explicit overwrite keeps an encrypted binary backup."""
-        self._require_binary_write()
-        if not self.allow_writes or not isinstance(data, bytes) or len(data) > 8 * 1024 * 1024:
-            raise PermissionDenied('Binary write denied or exceeds 8 MiB')
         from .privacy import assert_public_text
-        assert_public_text(data)
-        if str(path).casefold().endswith(('.xlsx','.docx')):
-            from .office_documents import package
-            package(data)
-        if str(path).casefold().endswith('.pdf'):
-            from .pdf_tools import inspect_pdf_bytes
-            inspect_pdf_bytes(data,deadline=deadline)
-        self._audit('media_write_intent', True, path)
         with self._lock, self._store.locked():
-            self._require_binary_write()
+            # Everything in this block is preflight or private recovery
+            # preparation. No workspace bytes are changed until _tree.write.
             try:
-                old = self._tree.read(path, 8 * 1024 * 1024)
-            except FileNotFoundError:
-                old = None
-            if old is not None:
-                assert_public_text(old)
-                if str(path).casefold().endswith(('.xlsx','.docx')):package(old)
-                if str(path).casefold().endswith('.pdf'):inspect_pdf_bytes(old,deadline=deadline)
-                if not overwrite:
-                    raise FileExistsError('Choose a new media destination')
-                if expected_sha256 is not None and hashlib.sha256(old).hexdigest() != expected_sha256:
+                self._require_binary_write()
+                if not self.allow_writes or not isinstance(data, bytes) or len(data) > 8 * 1024 * 1024:
+                    raise PermissionDenied('Binary write denied or exceeds 8 MiB')
+                assert_public_text(data)
+                if str(path).casefold().endswith(('.xlsx','.docx')):
+                    from .office_documents import package
+                    package(data)
+                if str(path).casefold().endswith('.pdf'):
+                    from .pdf_tools import inspect_pdf_bytes
+                    inspect_pdf_bytes(data,deadline=deadline)
+                self._audit('media_write_intent', True, path)
+                self._require_binary_write()
+                try:
+                    old = self._tree.read(path, 8 * 1024 * 1024)
+                except FileNotFoundError:
+                    old = None
+                if old is not None:
+                    assert_public_text(old)
+                    if str(path).casefold().endswith(('.xlsx','.docx')):package(old)
+                    if str(path).casefold().endswith('.pdf'):inspect_pdf_bytes(old,deadline=deadline)
+                    if not overwrite:
+                        raise OperationNotAppliedFileExists('Choose a new media destination')
+                    if expected_sha256 is not None and hashlib.sha256(old).hexdigest() != expected_sha256:
+                        raise PermissionDenied('File changed; read it again before modifying')
+                elif expected_sha256 is not None:
                     raise PermissionDenied('File changed; read it again before modifying')
-            elif expected_sha256 is not None:
-                raise PermissionDenied('File changed; read it again before modifying')
-            backup = self._store.backup(path, old, binary=True) if old is not None else None
-            self._require_binary_write()
-            if deadline is not None and time.monotonic()>=deadline:
-                raise PermissionDenied('Processing deadline exceeded; no output saved')
-            self._tree.write(path, data, overwrite=overwrite)
+                backup = self._store.backup(path, old, binary=True) if old is not None else None
+                self._require_binary_write()
+                if deadline is not None and time.monotonic()>=deadline:
+                    raise PermissionDenied('Processing deadline exceeded; no output saved')
+            except OperationNotApplied:
+                raise
+            except (PermissionDenied, ValueError, OSError) as exc:
+                raise OperationNotApplied(str(exc)) from exc
+            try:
+                self._tree.write(path, data, overwrite=overwrite)
+            except FileExistsError as exc:
+                raise OperationNotAppliedFileExists('Destination appeared before write; no output was changed') from exc
         self._audit('media_write', True, path)
         return {'path': path, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'backup_id': backup}
 
