@@ -2267,3 +2267,23 @@ def test_workspace_guard_rechecks_sessions_after_resource_lock_wait(pc, monkeypa
         pc._sessions.pop('racing-command', None)
         if worker.is_alive():
             worker.join(5)
+
+
+@pytest.mark.parametrize("status", [["active"], {"unexpected": "active"}])
+def test_unhashable_persisted_task_status_raises_coordination_error(pc, status):
+    store = coordinator(pc)
+    store.save({
+        "tasks": {
+            "broken": {
+                "id": "broken",
+                "status": status,
+                "resources": [],
+            },
+        },
+        "workflows": {},
+        "runs": {},
+        "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="state"):
+        store.load()
