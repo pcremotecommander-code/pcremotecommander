@@ -378,3 +378,23 @@ def test_disable_control_stops_owned_commands_and_requires_operation_review(cont
         operation=store.load()['operations'][operation_id]
     assert operation['state']=='needs_review'
     assert 'never replay' in operation['note'].lower()
+
+def test_controlled_process_rechecks_permission_at_locked_launch(control,monkeypatch):
+    original_start=control._start_owned_session
+    monkeypatch.setattr(control,'_check',lambda capability:None)
+
+    def disable_before_launch(profile,launch,**kwargs):
+        # Simulate disable_control winning the lock between the public
+        # permission check and process publication.
+        with control._lock:
+            control._disabled=True
+        return original_start(profile,launch,**kwargs)
+
+    monkeypatch.setattr(control,'_start_owned_session',disable_before_launch)
+    with pytest.raises(ValueError,match='disabled or expired'):
+        control.start_program(
+            sys.executable,
+            ['-I','-c','print("must-not-launch")'],
+            timeout_seconds=5,
+        )
+    assert not control._sessions
