@@ -430,6 +430,18 @@ class Coordination:
             self.save(data)
             return True
 
+    def _session_snapshot(self):
+        """Return a stable best-effort session view without taking the session lock.
+
+        Coordination paths may already hold the private-store lock. Acquiring
+        the commander session lock here would invert the start/stop lock order.
+        If the registry changes during iteration, callers fail closed instead.
+        """
+        try:
+            return tuple(self.commander._sessions.values())
+        except RuntimeError:
+            return None
+
     def expire(self, data):
         changed = False
         for task in data['tasks'].values():
@@ -445,7 +457,11 @@ class Coordination:
             self.save(data)
 
     def promote(self, data):
-        if any(entry.get('profile') == 'operator_command' and not entry['done'].is_set() for entry in self.commander._sessions.values()):
+        sessions = self._session_snapshot()
+        if sessions is None or any(
+            entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+            for entry in sessions
+        ):
             return False
         tasks=data['tasks'].values()
         held=[t for t in tasks if t['status'] in {'active','needs_review'}]
@@ -624,7 +640,10 @@ class Coordination:
             raise CoordinationError('TASK_LEASE_REQUIRED', 'Assignment expired or token does not match. Inspect list_tasks; uncertain operations require reconciliation.')
 
     def running(self, task_id):
-        for entry in self.commander._sessions.values():
+        sessions = self._session_snapshot()
+        if sessions is None:
+            return True
+        for entry in sessions:
             if entry.get('task_id') != task_id:
                 continue
             done = entry.get('done')
@@ -663,10 +682,16 @@ class Coordination:
             yield
             return
         if (not allow_active_sessions
-                and any(target == 'workspace' or target.startswith('file:') for target in targets)
-                and any(entry.get('profile') == 'operator_command' and not entry['done'].is_set()
-                        for entry in self.commander._sessions.values())):
-            raise CoordinationError('TASK_CONFLICT', 'An owned command is still running with workspace access. Inspect or stop that session before starting another workspace operation.')
+                and any(target == 'workspace' or target.startswith('file:') for target in targets)):
+            sessions = self._session_snapshot()
+            if sessions is None or any(
+                entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+                for entry in sessions
+            ):
+                raise CoordinationError(
+                    'TASK_CONFLICT',
+                    'An owned command may still be running with workspace access, or the session registry changed during inspection. Inspect or stop that session before retrying.',
+                )
         operation_id = uuid.uuid4().hex
         # Acquire resource locks before publishing the active record. A crash
         # before publication cannot have entered user work; after publication,
