@@ -772,6 +772,18 @@ class ControlCommander(PortableCommander):
     def _terminate(proc):
         if getattr(proc, 'pcrc_finalized', False):
             return
+        if os.name == 'nt' and getattr(proc, 'pcrc_job_handle', None):
+            job_handle = proc.pcrc_job_handle
+            try:
+                active = windows_job_active_processes(job_handle)
+            except OSError:
+                # If the Job Object cannot be queried, fail closed: record a
+                # forced stop before attempting tree termination.
+                active = 1
+            if active:
+                proc.pcrc_terminated = True
+                terminate_windows_job_and_wait(job_handle)
+            return
         if os.name == 'posix' and getattr(proc, 'pcrc_child_pid', None):
             # Ask a live supervisor to kill the child process group. If the
             # supervisor has already crashed, do not signal a bare PID: the
