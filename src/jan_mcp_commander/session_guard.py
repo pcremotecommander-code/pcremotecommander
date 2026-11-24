@@ -605,7 +605,9 @@ def supervise(config):
                     break
                 sys.stdout.buffer.write(packet)
                 sys.stdout.buffer.flush()
-            if descendants_terminated:
+            if descendants_terminated or exit_code < 0:
+                # Exit 125 is the private review-required sentinel for a
+                # terminated descendant tree or a command killed by signal.
                 return 125
             return exit_code
         finally:
