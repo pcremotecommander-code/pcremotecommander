@@ -533,7 +533,7 @@ def supervise_linux_guardian(config, lock_fd):
             "argv": config["argv"],
             "lock_fd": lock_fd,
         }
-        guardian.stdin.write((json.dumps(guardian_config) + "\\n").encode("utf-8"))
+        guardian.stdin.write((json.dumps(guardian_config) + "\n").encode("utf-8"))
         guardian.stdin.flush()
 
         import select
@@ -550,7 +550,7 @@ def supervise_linux_guardian(config, lock_fd):
         ready = json.loads(ready_line.decode("utf-8"))
         if ready.get("ready") is not True or type(ready.get("pid")) is not int:
             raise RuntimeError("Linux command guardian returned an invalid handshake")
-        sys.stdout.write(json.dumps(ready) + "\\n")
+        sys.stdout.write(json.dumps(ready) + "\n")
         sys.stdout.flush()
 
         input_thread = threading.Thread(
@@ -639,7 +639,7 @@ def supervise_guardian(config):
         child.wait()
         return 125
 
-    sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\\n")
+    sys.stdout.write(json.dumps({"ready": True, "pid": child.pid}) + "\n")
     sys.stdout.flush()
     child_done = threading.Event()
     input_thread = threading.Thread(
