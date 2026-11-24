@@ -680,7 +680,11 @@ class ControlCommander(PortableCommander):
                                         group_alive = True
                                 if acquired and not group_alive:
                                     coordinator(self).finish_detached_operation(
-                                        operation_id, success=(supervisor.returncode == 0 and not getattr(supervisor, 'pcrc_terminated', False)),
+                                        # A naturally exited command is complete
+                                        # even when its exit code is nonzero. The
+                                        # code is retained in the receipt; only
+                                        # externally terminated runs stay review-required.
+                                        operation_id, success=not getattr(supervisor, 'pcrc_terminated', False),
                                         exit_code=supervisor.returncode,
                                         terminated=getattr(supervisor, 'pcrc_terminated', False))
                                     supervisor.pcrc_finalized = True
