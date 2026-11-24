@@ -401,3 +401,16 @@ def test_capability_scope_reservations_privacy_and_size_limits(commander):
     with pytest.raises(ValueError):markdown_pdf('![remote](https://invalid.example/image.png)',{})
     from jan_mcp_commander.document_formats import edit_docx
     with pytest.raises(ValueError):edit_docx(docx('{{pass','word}}'),values={'password':'synthetic-value'})
+
+def test_receipt_polling_does_not_reserve_workspace(commander):
+    from jan_mcp_commander.coordination import coordinator
+
+    data=docx();(commander.workspace/'source.docx').write_bytes(data)
+    plan=review_jobs(commander,[editing(data)])
+    assert plan['status']=='previewed'
+
+    # A disjoint active workspace operation must not block a read-only receipt.
+    store=coordinator(commander)
+    with store.guard(['file:unrelated.txt']):
+        receipt=commander.get_document_workflow(plan['plan_id'])
+    assert receipt['status']=='previewed'
