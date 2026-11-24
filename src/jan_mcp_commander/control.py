@@ -354,6 +354,11 @@ class ControlCommander(PortableCommander):
         self._check('files')
         if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
             raise OperationNotApplied('Expected SHA256 required')
+        try:
+            with self._tree.parent(path):
+                pass
+        except (OSError, ValueError) as exc:
+            raise OperationNotApplied('Delete path is unavailable or unsafe') from exc
         self._audit('delete_intent', True, str(path))
         try:
             with self._lock, self._store.locked():
@@ -378,9 +383,18 @@ class ControlCommander(PortableCommander):
         from .safe_fs import unsupported_content
         self._check('files')
         if not isinstance(source, str) or not isinstance(destination, str) or source.casefold() == destination.casefold():
-            raise PermissionDenied('Choose distinct workspace paths')
+            raise OperationNotApplied('Choose distinct workspace paths')
         if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
             raise OperationNotApplied('Expected SHA256 required')
+        # Resolve both parents before creating a recovery backup. Invalid or
+        # missing destination parents are definite preconditions, not writes.
+        try:
+            with self._tree.parent(source):
+                pass
+            with self._tree.parent(destination):
+                pass
+        except (OSError, ValueError) as exc:
+            raise OperationNotApplied('Move path is unavailable or unsafe') from exc
         self._audit('move_intent', True, str(source))
         try:
             with self._lock, self._store.locked():
@@ -1189,7 +1203,7 @@ class ControlCommander(PortableCommander):
         except ValueError as exc:
             raise OperationNotApplied(str(exc)) from exc
         if sys.platform.startswith('linux') and (os.environ.get('XDG_SESSION_TYPE') != 'x11' or not os.environ.get('DISPLAY')):
-            raise PermissionDenied('Linux desktop input requires an X11 session. Wayland input is unavailable.')
+            raise OperationNotApplied('Linux desktop input requires an X11 session. Wayland input is unavailable.')
         if action not in {'screenshot', 'click', 'right_click', 'double_click', 'drag', 'move', 'scroll', 'type', 'hotkey'}:
             raise OperationNotApplied('Unknown desktop action')
         if type(x) is not int or type(y) is not int or type(amount) is not int or not -20 <= amount <= 20:
