@@ -810,6 +810,7 @@ def coordinated(kind, *paths):
                     if entry is not None:
                         entry['task_id'] = current[0]
                         entry['task_lease_token'] = current[1]
+                        self._watch_task_lease(result.get('session_id'))
                 return result
         return guarded
     return decorate
