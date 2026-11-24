@@ -803,10 +803,19 @@ class ControlCommander(PortableCommander):
             return
         PortableCommander._terminate(proc)
 
-    @staticmethod
-    def _check_session_task_access(entry):
+    def _check_session_task_access(self, entry=None):
         current = assignment.get()
-        if current is not None and entry.get('task_id') != current[0]:
+        if current is None:
+            return
+        tasks = coordinator(self)
+        with tasks.store.locked():
+            data = tasks.load()
+            tasks.expire(data)
+            task = data['tasks'].get(current[0])
+            if task is None:
+                raise PermissionDenied('Task assignment is unavailable or expired; inspect list_tasks.')
+            tasks.validate(task, current[1])
+        if entry is not None and entry.get('task_id') != current[0]:
             raise PermissionDenied(
                 'This command session belongs to another task or the unassigned operator. '
                 'Use the matching task assignment or an unassigned operator session.'
@@ -907,6 +916,7 @@ class ControlCommander(PortableCommander):
 
     def list_sessions(self):
         self._check('commands')
+        self._check_session_task_access()
         result = super().list_sessions()
         current = assignment.get()
         if current is not None:
