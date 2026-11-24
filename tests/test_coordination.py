@@ -1735,3 +1735,29 @@ def test_two_process_recovery_workers_never_double_recover_one_operation(pc):
                 process.join(5)
         for receive in receivers:
             receive.close()
+
+def test_task_owned_session_access_requires_unexpired_lease(pc):
+    import threading
+    from types import SimpleNamespace
+
+    store=coordinator(pc)
+    lease=claim(store,'expired session owner',['workspace'])
+    pc._sessions['expired-owner-session']={
+        'profile':'operator_command','task_id':lease['id'],
+        'process':SimpleNamespace(pid=303,poll=lambda:0),
+        'done':threading.Event(),'output':bytearray(b'secret session output'),
+        'truncated':False,'timed_out':False,
+    }
+    pc._sessions['expired-owner-session']['done'].set()
+    with store.store.locked():
+        data=store.load()
+        data['tasks'][lease['id']]['expires_at']=store.clock()-1
+        store.save(data)
+
+    try:
+        with pytest.raises(PermissionDenied,match='Assignment expired'):
+            assigned(lease,lambda:pc.process_output('expired-owner-session'))
+        with pytest.raises(PermissionDenied,match='Assignment expired'):
+            assigned(lease,pc.list_sessions)
+    finally:
+        pc._sessions.pop('expired-owner-session',None)
