@@ -25,10 +25,20 @@ def test_completed_jobs_not_counted_as_running_and_history_bounded(cmd):
         info=cmd.start_program(sys.executable,['-I','-c','print(1)'],timeout_seconds=5)
         assert cmd._sessions[info['session_id']]['done'].wait(5)
     assert len(cmd._sessions)<=16
-    active=[]
-    for i in range(4):active.append(cmd.start_program(sys.executable,['-I','-c','import time;time.sleep(20)'],timeout_seconds=20))
-    with pytest.raises(ValueError,match='Running session limit'):cmd.start_program(sys.executable,['-V'])
-    for item in active:cmd.stop_session(item['session_id'])
+
+    # Arbitrary shell commands reserve the whole workspace. A second command
+    # must wait until the first is stopped; allowing four concurrent commands
+    # would reintroduce uncoordinated workspace writes.
+    active=cmd.start_program(sys.executable,['-I','-c','import time;time.sleep(20)'],timeout_seconds=20)
+    with pytest.raises(ValueError,match='owned command is still running'):
+        cmd.start_program(sys.executable,['-V'])
+    assert not cmd._sessions[active['session_id']]['done'].is_set()
+    cmd.stop_session(active['session_id'])
+
+    # Once the owned command has fully stopped, the workspace reservation is
+    # released and another command can start normally.
+    next_job=cmd.start_program(sys.executable,['-I','-c','print(2)'],timeout_seconds=5)
+    assert cmd._sessions[next_job['session_id']]['done'].wait(5)
 
 def test_safe_public_errors_never_reflect_payloads():
     secret='synthetic token and command'
