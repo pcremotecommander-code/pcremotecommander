@@ -1803,8 +1803,8 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
     )
     wait_for_grandchild=(
         "deadline=time.monotonic()+10; "
-        "exec("+repr("while not os.path.exists("+repr(str(pid_file))+" ) and time.monotonic()<deadline: time.sleep(0.01)")+"); "
-        "if not os.path.exists("+repr(str(pid_file))+"): raise SystemExit(9)"
+        "exec("+repr("while not os.path.exists("+repr(str(pid_file))+") and time.monotonic()<deadline:\\n    time.sleep(0.01)")+"); "
+        "assert os.path.exists("+repr(str(pid_file))+"), 'detached child did not start'"
     )
     wait_for_release=(
         "deadline=time.monotonic()+20; "
