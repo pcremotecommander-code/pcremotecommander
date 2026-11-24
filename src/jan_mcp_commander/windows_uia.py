@@ -63,7 +63,10 @@ def query(request, check):
                 raise UIAutomationError(code, FILE_DIALOG_MESSAGE)
             if code not in {'UIA_UNAVAILABLE', 'UIA_TARGET_CHANGED', 'UIA_PROTECTED', 'UIA_UNSUPPORTED', 'UIA_ACTION_UNCERTAIN'}:
                 code = 'UIA_UNAVAILABLE'
-            raise UIAutomationError(code, 'UI Automation could not safely complete this step. Inspect again; never replay uncertain input.')
+            message = 'UI Automation could not safely complete this step. Inspect again; never replay uncertain input.'
+            if code in {'UIA_TARGET_CHANGED', 'UIA_PROTECTED', 'UIA_UNSUPPORTED', 'UIA_FILE_DIALOG'}:
+                raise UIAutomationPreconditionError(code, message)
+            raise UIAutomationError(code, message)
         return result
     except UIAutomationError:
         raise
