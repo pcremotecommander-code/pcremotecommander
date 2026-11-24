@@ -1893,3 +1893,28 @@ def test_task_state_exposes_sanitized_unresolved_operation_ids_for_recovery(pc):
 
     reviewed=store.task('reconcile_operation',operation_id=operation_id,reviewed=True)
     assert reviewed['state']=='abandoned_after_review'
+
+def test_detached_command_reuses_workspace_lock_identifiers(pc):
+    store=coordinator(pc)
+    lock_sets=[]
+
+    for _ in range(2):
+        result=pc.start_program(
+            sys.executable,['-c','print("stable-lock-test")'],timeout_seconds=10)
+        entry=pc._sessions[result['session_id']]
+        assert entry['done'].wait(10), 'detached command did not finalize'
+        assert entry['process'].wait(timeout=5)==0
+
+        with store.store.locked():
+            records=[
+                record for record in store.load()['operations'].values()
+                if record.get('kind')=='detached_command'
+                and record.get('owner',{}).get('supervisor_pid')==result['supervisor_pid']
+            ]
+        assert len(records)==1
+        assert records[0]['state']=='completed'
+        lock_sets.append(records[0]['lock_resources'])
+
+    assert lock_sets[0]==lock_sets[1]
+    assert lock_sets[0][0].startswith('session:')
+    assert lock_sets[0][1].startswith('session-owner:')
