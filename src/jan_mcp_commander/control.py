@@ -1395,29 +1395,37 @@ class ControlCommander(PortableCommander):
             self._closed = True
             self._disabled = True
             self.allow_writes = False
-            session_ids = list(self._sessions)
+            session_entries = {
+                session_id: entry for session_id, entry in self._sessions.items()
+            }
 
-        for session_id in session_ids:
+        remaining = []
+        for session_id, entry in session_entries.items():
             try:
                 PortableCommander.stop_session(self, session_id)
             except Exception:
                 # Do not hide a failed cleanup by deleting the session. The
                 # collector/finalizer keeps its receipt and locks fail closed.
-                entry = self._sessions.get(session_id)
-                if entry is not None:
-                    try:
-                        self._terminate(entry['process'])
-                    except Exception:
-                        pass
-
-        remaining = []
-        with self._lock:
-            for session_id in session_ids:
-                entry = self._sessions.get(session_id)
-                if entry is not None and (
-                    not entry['done'].is_set() or entry['process'].poll() is None
-                ):
-                    remaining.append(session_id)
+                try:
+                    self._terminate(entry['process'])
+                except Exception:
+                    pass
+            try:
+                entry['process'].wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            done_event = entry.get('done')
+            if done_event is not None:
+                done_event.wait(5)
+            process_exited = entry['process'].poll() is not None
+            collector_finished = done_event is None or done_event.is_set()
+            if not process_exited or not collector_finished:
+                remaining.append(session_id)
+                # The base stop method removes entries immediately after
+                # requesting termination. Restore incomplete sessions so they
+                # remain inspectable and can be stopped again on retry.
+                with self._lock:
+                    self._sessions.setdefault(session_id, entry)
 
         if not already_closed:
             if self._foreground_parent is not None:
