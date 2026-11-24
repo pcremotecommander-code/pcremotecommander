@@ -829,6 +829,22 @@ class ControlCommander(PortableCommander):
                 proc.pcrc_terminated = True
                 terminate_windows_job_and_wait(job_handle)
             return
+        if os.name == 'nt':
+            # Legacy fixed-profile sessions predate detached Job Object
+            # supervision. Their Popen handle still identifies the original
+            # process safely, so terminate and reap that process directly.
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except OSError:
+                    if proc.poll() is None:
+                        raise
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            return
         if os.name == 'posix' and getattr(proc, 'pcrc_child_pid', None):
             # Ask a live supervisor to kill the child process group. If the
             # supervisor has already crashed, do not signal a bare PID: the
