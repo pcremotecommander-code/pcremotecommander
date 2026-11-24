@@ -67,7 +67,7 @@ test('Cloudflare runtime: browser approval, signed WSS, real OAuth and Python MC
     const accountStub=mf.getDurableObjectNamespace('DEVICES').get(mf.getDurableObjectNamespace('DEVICES').idFromName('1234'));
     const manifestBody='{}',manifestPath='/backup/manifest',manifestTime=String(Date.now());
     const hmac=async message=>{const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(bindings.JAN_PROXY_KEY),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(message)));return Buffer.from(bytes).toString('base64url');};
-    const operatorKey=await hmac('JAN_DEVICE_KEY_V1\\n'+'PCRC_OPERATOR_V1\\n'+manifestPath+'\\n1234\\n'+manifestTime+'\\n'+manifestBody);
+    const operatorKey=await hmac('JAN_DEVICE_KEY_V1\n'+'PCRC_OPERATOR_V1\n'+manifestPath+'\n1234\n'+manifestTime+'\n'+manifestBody);
     const unsigned=await accountStub.fetch('https://internal.invalid'+manifestPath,{method:'POST',headers:{'Content-Type':'application/json','X-Jan-Account-Id':'1234'},body:manifestBody});
     assert.equal(unsigned.status,403,'Backup manifest must reject unsigned requests');
     const wrongMethod=await accountStub.fetch('https://internal.invalid'+manifestPath,{method:'GET',headers:{'X-Jan-Account-Id':'1234'}});
