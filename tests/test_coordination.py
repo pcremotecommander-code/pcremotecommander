@@ -2319,7 +2319,7 @@ def test_malformed_run_records_are_rejected_during_reconciliation(pc, run_record
         store.save(data)
 
     with pytest.raises(CoordinationError) as error:
-        store.task("reconcile", task_id=lease["id"], reviewed=True)
+        store.reconcile_task(lease["id"], reviewed=True)
     assert error.value.code == "TASK_STATE_INVALID"
 
 
