@@ -705,6 +705,26 @@ class Coordination:
             for target in targets:
                 resource_locks.enter_context(self.store.resource_locked(target))
 
+            # The first session check is only a fast rejection. A command can
+            # start while this call waits for the resource lock, so recheck
+            # after acquiring it and before publishing this operation.
+            if (not allow_active_sessions
+                    and any(target == 'workspace' or target.startswith('file:') for target in targets)):
+                sessions = self._session_snapshot()
+                if sessions is None:
+                    raise CoordinationError(
+                        'TASK_CONFLICT',
+                        'The session registry changed during inspection. Inspect or stop active sessions before retrying this workspace operation.',
+                    )
+                if any(
+                    entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+                    for entry in sessions
+                ):
+                    raise CoordinationError(
+                        'TASK_CONFLICT',
+                        'An owned command is still running with workspace access. Inspect or stop that session before starting another workspace operation.',
+                    )
+
             with self.store.locked():
                 data = self.load()
                 self.expire(data)
