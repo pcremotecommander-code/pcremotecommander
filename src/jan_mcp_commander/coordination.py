@@ -517,8 +517,9 @@ class Coordination:
                 return {
                     'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]],
                     'truncated': len(tasks) > 20,
-                    'operations': unresolved[:100],
-                    'operations_truncated': len(unresolved) > 100,
+                    # MAX_OPERATION_RECORDS bounds the full unresolved
+                    # list, so every recovery ID remains discoverable.
+                    'operations': unresolved,
                 }
             if action == 'create':
                 title = args.get('title', '')
