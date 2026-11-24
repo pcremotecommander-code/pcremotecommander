@@ -390,6 +390,8 @@ class ControlCommander(PortableCommander):
                 except (OSError, ValueError):
                     self._tree.unlink_file(destination)
                     raise
+        except OperationNotApplied:
+            raise
         except (OSError, ValueError) as exc:
             raise PermissionDenied('Move denied') from exc
         self._audit('move_text', True, f'{source};backup={backup_id}')
