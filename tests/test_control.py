@@ -342,3 +342,39 @@ def test_create_pdf_is_searchable_exclusive_and_workspace_confined(control):
         control.create_pdf('unicode.pdf', '日本語')
     assert (control.workspace / 'new.pdf').read_bytes() == original
     assert not (control.workspace / 'unicode.pdf').exists()
+
+def test_disable_control_stops_owned_commands_and_requires_operation_review(control):
+    from jan_mcp_commander.coordination import coordinator
+
+    info=control.start_program(
+        sys.executable,
+        ['-I','-c','import time; time.sleep(60)'],
+        timeout_seconds=60,
+    )
+    session_id=info['session_id']
+    entry=control._sessions[session_id]
+    assert entry['process'].poll() is None
+
+    store=coordinator(control)
+    with store.store.locked():
+        data=store.load()
+        active=[
+            (identifier,record)
+            for identifier,record in data['operations'].items()
+            if isinstance(record,dict)
+            and record.get('kind')=='detached_command'
+            and record.get('state')=='active'
+        ]
+    assert active, 'command must have a durable active operation before shutdown'
+    operation_id=active[-1][0]
+
+    result=control.disable_control()
+    assert result=={'control_enabled':False,'restart_locally_required':True}
+    assert entry['done'].wait(10), 'owned command session did not finish during disable'
+    assert entry['process'].poll() is not None
+    assert session_id not in control._sessions
+
+    with store.store.locked():
+        operation=store.load()['operations'][operation_id]
+    assert operation['state']=='needs_review'
+    assert 'never replay' in operation['note'].lower()
