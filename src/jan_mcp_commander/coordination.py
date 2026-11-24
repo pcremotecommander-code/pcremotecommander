@@ -262,7 +262,17 @@ class Coordination:
                     'TASK_REVIEW_REQUIRED',
                     'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.',
                 )
-            task_identity = (task['id'], task.get('revision'), task.get('lease_token'))
+            # Reconciliation spans two lock phases. Capture the full lease
+            # identity so a concurrent renewal or scope/state change cannot
+            # be silently overwritten by the second phase.
+            task_identity = (
+                task['id'],
+                task.get('revision'),
+                task.get('lease_token'),
+                task.get('status'),
+                task.get('expires_at'),
+                tuple(task.get('resources', ())),
+            )
 
         with ExitStack() as locks:
             for _, operation in operations:
@@ -272,7 +282,12 @@ class Coordination:
                 self.expire(data)
                 task = data['tasks'].get(task_id)
                 if task is None or (
-                    task['id'], task.get('revision'), task.get('lease_token')
+                    task['id'],
+                    task.get('revision'),
+                    task.get('lease_token'),
+                    task.get('status'),
+                    task.get('expires_at'),
+                    tuple(task.get('resources', ())),
                 ) != task_identity:
                     raise CoordinationError(
                         'TASK_REVIEW_REQUIRED',
