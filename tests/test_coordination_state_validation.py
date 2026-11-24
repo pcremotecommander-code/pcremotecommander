@@ -74,3 +74,46 @@ def test_malformed_active_operation_is_never_released_by_recovery(store):
     assert result["changed"] == ["malformed-operation"]
     assert result["recovered"] == []
     assert store.load()["operations"]["malformed-operation"] == operation
+
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        None,
+        [],
+        {},
+        {"task_id": ["task-1"], "status": "unknown"},
+        {"task_id": "task-1", "status": ["unknown"]},
+    ],
+)
+def test_malformed_run_record_returns_safe_state_error(store, run):
+    store.save({
+        "tasks": {},
+        "workflows": {},
+        "runs": {"run-1": run},
+        "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="state"):
+        store.load()
+
+
+def test_oversized_persisted_expiry_returns_safe_state_error(store):
+    store.save({
+        "tasks": {
+            "task-1": {
+                "id": "task-1",
+                "status": "active",
+                "resources": ["workspace"],
+                "expires_at": 10 ** 400,
+                "lease_token": "lease-token",
+            },
+        },
+        "workflows": {},
+        "runs": {},
+        "operations": {},
+    })
+
+    with pytest.raises(CoordinationError, match="expiry"):
+        store.load()
