@@ -2081,7 +2081,7 @@ def test_session_registry_mutation_fails_closed_without_locking_inversion(pc):
             self.mutation_number = 0
 
         def values(self):
-            iterator = super().values()
+            iterator = iter(super().values())
             if not self.mutate_during_iteration:
                 yield from iterator
                 return
