@@ -298,7 +298,10 @@ class ControlCommander(PortableCommander):
     def list_files(self, path='.'):
         """List workspace entries only when the files capability is enabled."""
         self._check('files')
-        return super().list_files(path)
+        try:
+            return super().list_files(path)
+        except PermissionDenied as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files', 'path')
     def read_text(self, path):
@@ -322,7 +325,10 @@ class ControlCommander(PortableCommander):
     def find_files(self, term, max_results=50, path='.'):
         """Search filenames within the reserved path and enabled file capability."""
         self._check('files')
-        return super().find_files(term, max_results, path)
+        try:
+            return super().find_files(term, max_results, path)
+        except PermissionDenied as exc:
+            raise OperationNotApplied(str(exc)) from exc
 
     @coordinated('files', 'path')
     def create_directory(self, path):
