@@ -1824,10 +1824,13 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
     store=coordinator(pc)
     pid_file=tmp_path/'supervisor-crash-grandchild.pid'
     release_file=tmp_path/'release-supervisor-crash-parent'
+    grandchild_release_file=tmp_path/'release-supervisor-crash-grandchild'
     grandchild=(
         "import os,time; "
         "f=open("+repr(str(pid_file))+",'w'); "
-        "f.write(str(os.getpid())); f.flush(); f.close(); time.sleep(30)"
+        "f.write(str(os.getpid())); f.flush(); f.close(); "
+        "deadline=time.monotonic()+60; "
+        "exec("+repr("while not os.path.exists("+repr(str(grandchild_release_file))+") and time.monotonic()<deadline: time.sleep(0.01)")+")"
     )
     wait_for_grandchild=(
         "deadline=time.monotonic()+10; "
@@ -1836,7 +1839,7 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
     )
     wait_for_release=(
         "deadline=time.monotonic()+20; "
-        "exec("+repr("while not os.path.exists("+repr(str(release_file))+" ) and time.monotonic()<deadline: time.sleep(0.01)")+")"
+        "exec("+repr("while not os.path.exists("+repr(str(release_file))+") and time.monotonic()<deadline: time.sleep(0.01)")+")"
     )
     parent=(
         "import subprocess,sys,time,os; "
@@ -1878,6 +1881,7 @@ def test_supervisor_crash_terminates_detached_grandchildren_before_unlock(pc,tmp
         assert records[-1]['state']=='needs_review'
     finally:
         release_file.write_text('release')
+        grandchild_release_file.write_text('release')
         if pidfd is not None:
             try:
                 ready,_,_=select.select([pidfd],[],[],0)
