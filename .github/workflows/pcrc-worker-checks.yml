@@ -41,5 +41,11 @@ jobs:
       - name: Type-check
         run: npm run check
 
+      - name: Install launcher test dependencies
+        run: npm ci
+        working-directory: deploy/npm/jan-commander
+
       - name: Build and run tests
         run: npm test
+        env:
+          PCRC_SOURCE_ONLY_TESTS: '1'
