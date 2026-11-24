@@ -122,6 +122,34 @@ export class JanDeviceStore {
     }
     const accountId=permittedAccount(request.headers.get('X-Jan-Account-Id')??(this.env.JAN_MULTI_USER_ENABLED==='1'?null:this.env.ALLOWED_GITHUB_ID),this.env.ALLOWED_GITHUB_ID,this.env.JAN_MULTI_USER_ENABLED,this.env.JAN_BETA_GITHUB_IDS);
     if(!accountId)return json({error:'Account denied'},403);
+    // A signed owner-only manifest read must not initialize an absent account object.
+    if(new URL(request.url).pathname==='/backup/manifest') {
+      if(request.method!=='POST')return json({error:'Method denied'},405);
+      const raw=await request.text();
+      if(raw.length>1024)return json({error:'Too large'},413);
+      let body:unknown;
+      try{body=JSON.parse(raw);}catch{return json({error:'Invalid request'},400);}
+      if(!body||Array.isArray(body)||typeof body!=='object')return json({error:'Invalid request'},400);
+      if(!await validOperator(request,this.env,accountId,raw))return json({error:'Owner proof required'},403);
+      const bound=await this.state.storage.get<string>('account:owner:v1');
+      if(bound!==accountId)return json({error:'Account store not initialized'},404);
+      const lifecycle=await deletionState(this.state.storage);
+      if(lifecycle.closing||lifecycle.deleted)return json({error:'Account unavailable'},410);
+      const counts:Record<string,number>={};
+      let keyCount=0,cursor:string|undefined,complete=false;
+      for(let page=0;page<4;page++){
+        const entries=await this.state.storage.list({limit:250,...(cursor?{startAfter:cursor}:{})});
+        for(const key of entries.keys()){
+          const separator=key.indexOf(':');
+          const group=separator<0?key:key.slice(0,separator)+':';
+          counts[group]=(counts[group]??0)+1;
+          keyCount++;
+        }
+        if(entries.size<250){complete=true;break;}
+        cursor=[...entries.keys()].at(-1);
+      }
+      return json({schemaVersion:1,accountId,generatedAt:Date.now(),keyCount,countsByPrefix:counts,complete});
+    }
     const ownsStore=await this.state.storage.transaction(async tx=>{
       const bound=await tx.get<string>('account:owner:v1');
       if(bound!==undefined)return bound===accountId;
