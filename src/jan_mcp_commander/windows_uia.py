@@ -6,6 +6,7 @@ import subprocess
 import time
 
 from .core import PermissionDenied
+from .core import OperationNotApplied
 from .privacy import sensitive_label, sensitive_text
 
 FILE_DIALOG_MESSAGE = 'Windows file dialog requires reviewed keyboard input. Verify the exact destination and reopen the saved file.'
@@ -15,6 +16,10 @@ class UIAutomationError(PermissionDenied):
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+class UIAutomationPreconditionError(UIAutomationError, OperationNotApplied):
+    """UI validation failed before any desktop action was dispatched."""
 
 
 def public_control(item):
