@@ -17,7 +17,7 @@ export function validWorkspaceScope(value:unknown):value is WorkspaceScope {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
  const scope=value as Record<string,unknown>;
  return typeof scope.repository==='string'&&repositoryPattern.test(scope.repository)&&
-  typeof scope.branch==='string'&&branchPattern.test(scope.branch)&&
+  validBranch(scope.branch)&&
   normalizeWorkspacePath(scope.path)!==null;
 }
 
