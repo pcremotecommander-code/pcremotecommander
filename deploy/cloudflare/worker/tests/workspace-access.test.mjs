@@ -20,6 +20,12 @@ test('workspace grants are bound to account, repository, branch, path boundary a
  assert.equal(workspaceGrantAllows(grant,{...base,access:'edit'},now),false,'read approval never authorizes edits');
 });
 
+test('workspace grants accept PCRC email-account identities and reject unsafe branch refs',()=>{
+ const emailGrant={...grant,accountId:'s-12345678-1234-4234-8234-123456789abc'};
+ assert.equal(validWorkspaceGrant(emailGrant,now),true);
+ for(const branch of ['../main','feature/../main','feature//admin','feature/'])assert.equal(validWorkspaceGrant({...grant,branch},now),false,branch);
+});
+
 test('expired and overlong grants fail closed',()=>{
  assert.equal(validWorkspaceGrant({...grant,expiresAt:now},now),false);
  assert.equal(validWorkspaceGrant({...grant,expiresAt:now+31*86400000},now),false);
