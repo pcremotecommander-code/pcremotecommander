@@ -12,7 +12,7 @@ type Env=Settings&{DEVICES:DurableObjectNamespace;PCRC_PUBLIC_SITE_ORIGIN?:strin
 const time=(value:unknown)=>typeof value==='number'&&value>0?new Date(value).toISOString().replace('T',' ').slice(0,16)+' UTC':'Not recorded';
 const panel=(title:string,content:string)=>'<section class="panel"><div class="panel-body"><h2>'+escaped(title)+'</h2>'+content+'</div></section>';
 const page=(body:string,title:string,owner:Owner,active:string,status=200)=>portalPage(body,title,{owner,ownerSite:true,active,status});
-const heading=(title:string,sub:string,action='')=>'<header class="owner-heading"><div><p class="owner-kicker">PCRC owner workspace</p><h1>'+escaped(title)+'</h1><p class="subtitle">'+escaped(sub)+'</p></div>'+action+'</header>';
+const heading=(title:string,sub:string,action='')=>'<header class="owner-heading"><div><p class="owner-kicker">PCRC Admin Dashboard</p><h1>'+escaped(title)+'</h1><p class="subtitle">'+escaped(sub)+'</p></div>'+action+'</header>';
 const ownerRedirect=(url:string)=>new Response(null,{status:303,headers:{Location:url,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
 const notice=(message:string,error=false)=>message?'<p class="owner-message'+(error?' owner-error':'')+'" role="status">'+escaped(message)+'</p>':'';
 const back=(q='')=>'/admin/users'+(q?'?'+new URLSearchParams({q}):'');
