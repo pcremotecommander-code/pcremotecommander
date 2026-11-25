@@ -237,3 +237,10 @@ test('expired authenticator setup never enables MFA and expiring Pro revokes onl
   await member.put('devices',{[first]:{id:first,name:'Retained PC',created:1,revoked:false},[second]:{id:second,name:'Extra PC',created:2,revoked:false}});await member.put('active',second);await member.put('billing:complimentary:v1',{until:Date.now()-1});
   await f.callStore('/device/list',{},'5678');const devices=await member.get('devices');assert.equal(devices[second].revoked,false);assert.equal(devices[first].revoked,true);
 });
+
+
+test('admin portal uses Admin Dashboard branding after owner MFA',async()=>{
+  const f=await ownerFixture();await unlockOwner(f);
+  const response=await f.request('/admin');assert.equal(response.status,200);
+  const html=await response.text();assert.match(html,/Admin Dashboard/);assert.doesNotMatch(html,/Owner console|PCRC owner workspace/);
+});
