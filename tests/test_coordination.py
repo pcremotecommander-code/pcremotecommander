@@ -36,7 +36,7 @@ def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     holder = claim(store, 'Previous workspace operation', ['workspace'])
-    now[0] += 121
+    now[0] += 601
     task = store.task('create', title='Open approved app')
     target = dict(task_id=task['id'], agent='Interactive', resources=['ui'], wait=False)
     with pytest.raises(CoordinationError) as error:
@@ -47,6 +47,32 @@ def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
     assert current[holder['id']]['status'] == 'needs_review'
     store.task('reconcile', task_id=holder['id'], reviewed=True)
     assert store.task('claim', **target)['status'] == 'active'
+
+
+
+def test_task_lease_survives_longer_interaction_and_slides_on_assigned_work(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    lease = claim(store, 'Long browser acceptance', ['ui'])
+    assert lease['expires_at'] == 1000 + 600
+
+    # A real acceptance test can take longer than the former 120-second TTL.
+    now[0] += 599
+    renewed = store.task('renew', task_id=lease['id'], lease_token=lease['lease_token'])
+    assert renewed['status'] == 'active'
+    assert renewed['expires_at'] == now[0] + 600
+
+    # Every successful assigned operation extends the idle window.
+    now[0] += 599
+    marker = assignment.set((lease['id'], lease['lease_token']))
+    try:
+        with store.guard(['ui']):
+            pass
+    finally:
+        assignment.reset(marker)
+    current = store.load()['tasks'][lease['id']]
+    assert current['status'] == 'active'
+    assert current['expires_at'] == now[0] + 600
 
 
 def test_eight_assignments_and_capacity_queue_promote_after_release(pc):
@@ -90,7 +116,7 @@ def test_uncertain_owner_blocks_queue_until_review_and_old_token_stays_fenced(pc
     second=claim(store,'second',['file:shared.txt'])
     now[0]=1090
     assert store.task('renew',task_id=second['id'],lease_token=second['lease_token'])['status']=='waiting'
-    now[0]=1121
+    now[0]=1621
     state={t['id']:t for t in store.task('list')['tasks']}
     assert state[first['id']]['status']=='needs_review'
     assert state[second['id']]['status']=='waiting'
@@ -104,7 +130,7 @@ def test_waiting_expiry_and_cancellation_never_grant_stale_token_access(pc):
     first=claim(store,'first',['file:shared.txt'])
     expired=claim(store,'expired',['file:shared.txt'])
     now[0]=1100;store.task('renew',task_id=first['id'],lease_token=first['lease_token'])
-    now[0]=1121
+    now[0]=1621
     assert next(t for t in store.task('list')['tasks'] if t['id']==expired['id'])['status']=='queued'
     with pytest.raises(CoordinationError):store.task('renew',task_id=expired['id'],lease_token=expired['lease_token'])
     waiting=claim(store,'cancelled',['file:shared.txt'])
@@ -205,7 +231,7 @@ def test_expiry_persists_uncertainty_and_reconciliation_fences_old_token(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     old = claim(store, 'old', ['file:nested'])
-    now[0] += 121
+    now[0] += 601
     assert store.task('list')['tasks'][0]['status'] == 'needs_review'
     other=claim(store, 'other', ['file:nested/a.txt'])
     assert other['status']=='waiting'
@@ -333,7 +359,7 @@ def test_interrupted_assignment_blocks_legacy_writes_until_review(pc):
     store = Coordination(pc, clock=lambda: now[0])
     setattr(pc, '_coordination', store)
     lease = claim(store, 'interrupted worker', ['file:abandoned.txt'])
-    now[0] += 121
+    now[0] += 601
     assert store.task('list')['tasks'][0]['status'] == 'needs_review'
     with pytest.raises(CoordinationError):
         assigned(lease, lambda: pc.write_text('abandoned.txt', 'must not execute'))

@@ -598,9 +598,30 @@ class ControlCommander(PortableCommander):
                 raise PermissionDenied('Install the browser extra and Chromium locally; see docs/computer-control.md') from exc
             driver = sync_playwright().start()
             browser = None
+            # Prefer the locally configured engine, then installed stable
+            # Chromium-family channels. Every candidate uses a fresh,
+            # ephemeral context; no normal browser profile or cookies are read.
+            channels = [self._browser_channel]
+            channels.extend(channel for channel in ('chrome', 'msedge', 'chromium')
+                            if channel not in channels)
+            failures = []
+            for channel in channels:
+                try:
+                    browser = driver.chromium.launch(
+                        headless=self._headless,
+                        chromium_sandbox=True,
+                        channel=None if channel == 'chromium' else channel,
+                    )
+                    break
+                except Exception as exc:
+                    failures.append(exc)
+                    browser = None
+            if browser is None:
+                driver.stop()
+                # Preserve the final Playwright exception so the public error
+                # mapper can return the established BROWSER_UNAVAILABLE code.
+                raise failures[-1]
             try:
-                browser = driver.chromium.launch(headless=self._headless, chromium_sandbox=True,
-                    channel=None if self._browser_channel == 'chromium' else self._browser_channel)
                 context = browser.new_context(accept_downloads=False, service_workers='block', viewport={'width':1280, 'height':800})
                 context.set_default_timeout(5000)
                 # No normal profile, exported cookies, extensions, storage API or arbitrary JS tool.
@@ -608,8 +629,7 @@ class ControlCommander(PortableCommander):
                 page.on('dialog', lambda dialog: dialog.dismiss())
                 self._browser = (driver, browser, context, page)
             except Exception:
-                if browser:
-                    browser.close()
+                browser.close()
                 driver.stop()
                 raise
         _, _, context, page = self._browser
