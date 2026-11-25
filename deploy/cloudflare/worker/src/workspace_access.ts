@@ -2,7 +2,7 @@ export type WorkspaceAccess='read'|'edit';
 export type WorkspaceScope={repository:string;branch:string;path:string};
 export type WorkspaceGrant=WorkspaceScope&{id:string;accountId:string;access:WorkspaceAccess;approvedBy:string;approvedAt:number;expiresAt:number};
 const repositoryPattern=/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
-const branchPattern=/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+const branchPattern=/^(?!\/)(?!.*\\.\\.)(?!.*\\.lock$)(?!.*\\/\\/)(?!.*\\/@\\{)(?!.*\\/$)[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 
 export function normalizeWorkspacePath(value:unknown):string|null {
  if(typeof value!=='string'||value.length===0||value.length>1024||/[\u0000-\u001f\u007f]/.test(value))return null;
