@@ -2,7 +2,11 @@ export type WorkspaceAccess='read'|'edit';
 export type WorkspaceScope={repository:string;branch:string;path:string};
 export type WorkspaceGrant=WorkspaceScope&{id:string;accountId:string;access:WorkspaceAccess;approvedBy:string;approvedAt:number;expiresAt:number};
 const repositoryPattern=/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
-const branchPattern=/^(?!\/)(?!.*\\.\\.)(?!.*\\.lock$)(?!.*\\/\\/)(?!.*\\/@\\{)(?!.*\\/$)[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+const branchPattern=/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+function validBranch(value:unknown):value is string {
+ return typeof value==='string'&&branchPattern.test(value)&&!value.startsWith('/')&&!value.endsWith('/')&&!value.includes('//')&&!value.includes('..')&&!value.endsWith('.lock')&&!value.includes('@{');
+}
+const accountPattern=/^(?:[1-9][0-9]{0,19}|s-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/;
 
 export function normalizeWorkspacePath(value:unknown):string|null {
  if(typeof value!=='string'||value.length===0||value.length>1024||/[\u0000-\u001f\u007f]/.test(value))return null;
@@ -17,18 +21,17 @@ export function validWorkspaceScope(value:unknown):value is WorkspaceScope {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
  const scope=value as Record<string,unknown>;
  return typeof scope.repository==='string'&&repositoryPattern.test(scope.repository)&&
-  validBranch(scope.branch)&&
-  normalizeWorkspacePath(scope.path)!==null;
+  validBranch(scope.branch)&&normalizeWorkspacePath(scope.path)!==null;
 }
 
 export function validWorkspaceGrant(value:unknown,now=Date.now()):value is WorkspaceGrant {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
  const grant=value as Record<string,unknown>;
- return typeof grant.id==='string'&&/^[a-f0-9-]{36}$/.test(grant.id)&&
-  typeof grant.accountId==='string'&&/^\d{1,20}$/.test(grant.accountId)&&
+ return typeof grant.id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(grant.id)&&
+  typeof grant.accountId==='string'&&accountPattern.test(grant.accountId)&&
   validWorkspaceScope(grant)&&
   (grant.access==='read'||grant.access==='edit')&&
-  typeof grant.approvedBy==='string'&&/^\d{1,20}$/.test(grant.approvedBy)&&
+  typeof grant.approvedBy==='string'&&/^[1-9][0-9]{0,19}$/.test(grant.approvedBy)&&
   typeof grant.approvedAt==='number'&&Number.isSafeInteger(grant.approvedAt)&&
   typeof grant.expiresAt==='number'&&Number.isSafeInteger(grant.expiresAt)&&
   grant.expiresAt>now&&grant.expiresAt>grant.approvedAt&&
