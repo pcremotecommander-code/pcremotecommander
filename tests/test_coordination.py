@@ -284,6 +284,22 @@ def test_failed_workflow_requires_review_before_task_release_and_new_lease(pc):
         store.task('renew', task_id=lease['id'], lease_token=lease['lease_token'])
 
 
+def test_reconciliation_reports_running_process_without_releasing_reservation(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    pc._coordination = store
+    lease = claim(store, 'interrupted process', ['workspace'])
+    process = assigned(lease, lambda: pc.start_program(sys.executable, ['-c', 'import time; time.sleep(30)']))
+    now[0] += 121
+    assert store.task('list')['tasks'][0]['status'] == 'needs_review'
+    with pytest.raises(CoordinationError) as error:
+        store.task('reconcile', task_id=lease['id'], reviewed=True)
+    assert error.value.code == 'TASK_PROCESS_RUNNING'
+    assert store.task('list')['tasks'][0]['status'] == 'needs_review'
+    pc.stop_session(process['session_id'])
+    assert store.task('reconcile', task_id=lease['id'], reviewed=True)['status'] == 'queued'
+
+
 def test_finishing_abandons_only_unstarted_remaining_steps_while_handoff_preserves_them(pc):
     store = coordinator(pc)
     lease = claim(store, 'handoff workflow', ['ui'])
