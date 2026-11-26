@@ -73,13 +73,14 @@ class Coordination:
                 task['status'] = 'needs_review'
                 task['note'] = 'Reservation expired. Inspect actual results before reconciling; do not replay uncertain writes.'
                 changed = True
-            elif task['status'] == 'waiting':
-                task.update(
-                    status='queued',
-                    resources=[],
-                    lease_token='',
-                    note='Legacy waiting assignment canceled in single-assistant mode; no work was authorized. Claim again when ready.',
-                )
+            elif task['status'] == 'waiting' or (
+                task['status'] == 'queued'
+                and any(key in task for key in ('agent', 'expires_at', 'queue_order'))
+            ):
+                was_waiting = task['status'] == 'waiting'
+                task.update(status='queued', resources=[], lease_token='')
+                if was_waiting:
+                    task['note'] = 'Legacy waiting assignment canceled in single-assistant mode; no work was authorized. Claim again when ready.'
                 task.pop('agent', None)
                 task.pop('expires_at', None)
                 task.pop('queue_order', None)
