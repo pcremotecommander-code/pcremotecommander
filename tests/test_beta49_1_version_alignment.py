@@ -37,6 +37,14 @@ def test_beta49_1_release_metadata_is_aligned():
     assert lock["version"] == NPM_VERSION
     assert lock["packages"][""]["version"] == NPM_VERSION
 
+    worker_release = (ROOT / "deploy/cloudflare/worker/src/release.ts").read_text(encoding="utf-8")
+    portal_ui = (ROOT / "deploy/cloudflare/worker/src/portal_ui.ts").read_text(encoding="utf-8")
+    worker_index = (ROOT / "deploy/cloudflare/worker/src/index.ts").read_text(encoding="utf-8")
+    assert "PCRC_RELEASE_VERSION = '0.7.0-beta.49.1'" in worker_release
+    assert "PCRC_RELEASE_LABEL = 'Beta.49.1'" in worker_release
+    assert "PCRC_RELEASE_LABEL" in portal_ui
+    assert "version:PCRC_RELEASE_VERSION" in worker_index
+
     worker_package = json.loads((ROOT / "deploy/cloudflare/worker/package.json").read_text(encoding="utf-8"))
     worker_lock = json.loads((ROOT / "deploy/cloudflare/worker/package-lock.json").read_text(encoding="utf-8"))
     assert worker_package["version"] == NPM_VERSION
