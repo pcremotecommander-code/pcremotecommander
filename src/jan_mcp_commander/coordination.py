@@ -15,6 +15,7 @@ from .security import PrivateStore
 
 assignment = ContextVar('pcrc_assignment', default=None)
 
+
 class CoordinationError(PermissionDenied):
     def __init__(self, code, message):
         super().__init__(message)
@@ -66,7 +67,6 @@ class Coordination:
         self.store.tree.write('tasks.enc', nonce + AESGCM(self.store.key).encrypt(nonce, raw, self.store.context), overwrite=True)
 
     def expire(self, data):
-    def expire(self, data):
         changed = False
         for task in data['tasks'].values():
             if task['status'] == 'active' and task['expires_at'] <= self.clock():
@@ -87,7 +87,8 @@ class Coordination:
         if changed:
             self.save(data)
 
-blic(task):
+    @staticmethod
+    def public(task):
         return {key: value for key, value in task.items() if key != 'lease_token'}
 
     def task(self, action, **args):
@@ -96,8 +97,8 @@ blic(task):
             self.expire(data)
             tasks = data['tasks']
             if action == 'list':
-                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review'}]
-                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review'}]
+                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
+                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
                 shown = held + recent[-max(1, 20 - len(held)):]
                 return {'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]], 'truncated': len(tasks) > 20}
             if action == 'create':
@@ -129,6 +130,14 @@ blic(task):
                 if not isinstance(agent, str) or not 1 <= len(agent) <= 80 or not isinstance(resources, list) or not 1 <= len(resources) <= 20:
                     raise ValueError('Agent label and 1..20 resources required')
                 resources = sorted(set(resource(r) for r in resources))
+                if any(
+                    entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+                    for entry in self.commander._sessions.values()
+                ):
+                    raise CoordinationError(
+                        'TASK_CONFLICT',
+                        'A PCRC-owned command is still running. Inspect or finish that operation before creating an assignment; no task was queued.',
+                    )
                 holder = next(
                     (other for other in tasks.values()
                      if other is not task and other['status'] in {'active', 'needs_review'}),
@@ -177,7 +186,6 @@ blic(task):
                     if not isinstance(note, str) or len(note) > 2000:
                         raise ValueError('Handoff note exceeds limit')
                     task['note'] = note
-
                 self.save(data)
                 return self.public(task)
             if action == 'reconcile':
@@ -188,7 +196,6 @@ blic(task):
                 task.update(status='queued', resources=[], lease_token='')
                 if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
                     self.commander._teaching = None
-
                 self.save(data)
                 return self.public(task)
             raise ValueError('Unknown task action')
