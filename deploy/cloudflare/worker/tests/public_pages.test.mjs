@@ -24,9 +24,9 @@ test('homepage explains practical benefits and fair coding-agent tradeoffs with 
   const page=readFileSync(`${root}index.html`,'utf8');
   assert.equal((page.match(/id="benefits"/g)??[]).length,1);
   assert.match(page,/PCRC, Codex or Claude Code/);
-  assert.match(page,/Build with multiple AI assistants/);
-  assert.match(page,/beta\.35, up to eight active assignments/);
-  assert.match(page,/Conflicting claims wait their turn/);
+  assert.match(page,/Single-assistant task control/);
+  assert.match(page,/one active task assignment/);
+  assert.match(page,/TASK_CONFLICT/);
   assert.match(page,/does not automatically launch models/);
   assert.doesNotMatch(page,/PCRC may add little/);
   assert.match(page,/CLI is not an autonomous coding assistant/);
