@@ -122,8 +122,11 @@ test('shared assignments reach guarded backend calls without changing old handle
     await client.callTool({ name: 'create_text_file', arguments: { path: 'new.txt', content: 'synthetic', confirmed: true, ...lease } });
     assert.equal(calls[0]?.name, 'jan_coordinated_call');
     assert.deepEqual(calls[0]?.args, { name: 'jan_write_text', arguments: { path: 'new.txt', content: 'synthetic', overwrite: false }, ...lease });
-    await client.callTool({ name: 'claim_task', arguments: { task_id: lease.task_id, agent: 'reviewer', resources: ['ui'], confirmed: true } });
-    assert.equal(calls[1]?.name, 'jan_team');
+    await client.callTool({ name: 'claim_task', arguments: { task_id: lease.task_id, agent: 'reviewer', resources: ['ui'], wait: true, confirmed: true } });
+    assert.deepEqual(calls[1], {
+      name: 'jan_team',
+      args: { action: 'claim', options: { task_id: lease.task_id, agent: 'reviewer', resources: ['ui'] } },
+    });
     await client.callTool({ name: 'teach_browser_workflow', arguments: { action: 'start', title: 'Demo', confirmed: true, ...lease } });
     assert.equal(calls[2]?.args.name, 'jan_browser_workflow');
     const incomplete = await client.callTool({ name: 'create_text_file', arguments: { path: 'new.txt', content: 'synthetic', confirmed: true, task_id: lease.task_id } });
