@@ -14,7 +14,6 @@ from .safe_fs import parts
 from .security import PrivateStore
 
 assignment = ContextVar('pcrc_assignment', default=None)
-MAX_ACTIVE_ASSIGNMENTS = 8
 
 
 class CoordinationError(PermissionDenied):
@@ -74,28 +73,20 @@ class Coordination:
                 task['status'] = 'needs_review'
                 task['note'] = 'Reservation expired. Inspect actual results before reconciling; do not replay uncertain writes.'
                 changed = True
-            elif task['status'] == 'waiting' and task['expires_at'] <= self.clock():
-                task.update(status='queued',resources=[],lease_token='',note='Queue request expired before assignment; no work was authorized. Claim again if still needed.')
+            elif task['status'] == 'waiting' or (
+                task['status'] == 'queued'
+                and any(key in task for key in ('agent', 'expires_at', 'queue_order'))
+            ):
+                was_waiting = task['status'] == 'waiting'
+                task.update(status='queued', resources=[], lease_token='')
+                if was_waiting:
+                    task['note'] = 'Legacy waiting assignment canceled in single-assistant mode; no work was authorized. Claim again when ready.'
+                task.pop('agent', None)
+                task.pop('expires_at', None)
+                task.pop('queue_order', None)
                 changed = True
-        changed = self.promote(data) or changed
         if changed:
             self.save(data)
-
-    def promote(self, data):
-        if any(entry.get('profile') == 'operator_command' and not entry['done'].is_set() for entry in self.commander._sessions.values()):
-            return False
-        tasks=data['tasks'].values()
-        held=[t for t in tasks if t['status'] in {'active','needs_review'}]
-        blocked=[]
-        changed=False
-        for task in sorted((t for t in tasks if t['status']=='waiting'),key=lambda t:t['queue_order']):
-            if len(held)>=MAX_ACTIVE_ASSIGNMENTS or any(overlaps(a,b) for other in held+blocked for a in other['resources'] for b in task['resources']):
-                blocked.append(task)
-                continue
-            task.update(status='active',expires_at=self.clock()+120)
-            held.append(task)
-            changed=True
-        return changed
 
     @staticmethod
     def public(task):
@@ -107,8 +98,8 @@ class Coordination:
             self.expire(data)
             tasks = data['tasks']
             if action == 'list':
-                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
-                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
+                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review'}]
+                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review'}]
                 shown = held + recent[-max(1, 20 - len(held)):]
                 return {'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]], 'truncated': len(tasks) > 20}
             if action == 'create':
@@ -128,40 +119,56 @@ class Coordination:
                 raise CoordinationError('TASK_NOT_FOUND', 'Task not found. Call list_tasks and use its task ID.')
             unresolved = [run for run in data['runs'].values() if run['task_id'] == task['id'] and run['status'] in {'unknown', 'failed'}]
             if action == 'claim':
-                if task['status'] not in {'queued'}:
-                    raise CoordinationError('TASK_CONFLICT', 'Task is assigned or requires review. Inspect list_tasks before continuing.')
+                if task['status'] == 'needs_review':
+                    raise CoordinationError(
+                        'TASK_REVIEW_REQUIRED',
+                        'This task has an expired or uncertain reservation. Inspect list_tasks and the actual file/process/UI state, then reconcile_task after review.',
+                    )
+                if task['status'] != 'queued':
+                    raise CoordinationError('TASK_CONFLICT', 'Task is already assigned or is not available for a new claim.')
                 agent = args.get('agent', '')
                 resources = args.get('resources', [])
-                wait = args.get('wait', True)
-                if type(wait) is not bool:
-                    raise ValueError('wait must be true or false')
                 if not isinstance(agent, str) or not 1 <= len(agent) <= 80 or not isinstance(resources, list) or not 1 <= len(resources) <= 20:
                     raise ValueError('Agent label and 1..20 resources required')
                 resources = sorted(set(resource(r) for r in resources))
-                order=max((t.get('queue_order',0) for t in tasks.values()),default=0)+1
-                task.update(agent=agent, resources=resources, status='waiting', expires_at=self.clock() + 120,queue_order=order,
-                            lease_token=secrets.token_urlsafe(32), revision=task['revision'] + 1)
-                self.promote(data)
-                if not wait and task['status'] == 'waiting':
+                if any(
+                    entry.get('profile') == 'operator_command' and not entry['done'].is_set()
+                    for entry in self.commander._sessions.values()
+                ):
                     raise CoordinationError(
                         'TASK_CONFLICT',
-                        'The requested assignment is busy. No waiting request was saved. Inspect list_tasks before trying again.',
+                        'A PCRC-owned command is still running. Inspect or finish that operation before creating an assignment; no task was queued.',
                     )
-                self.save(data)
-                instructions = (
-                    'Waiting grants no execution access. Poll renew_task within 120 seconds until active. '
-                    if task['status'] == 'waiting' else
-                    'Assignment is active. Use only the approved operations within its resources. '
+                holder = next(
+                    (other for other in tasks.values()
+                     if other is not task and other['status'] in {'active', 'needs_review'}),
+                    None,
                 )
-                return {**self.public(task), 'lease_token': task['lease_token'],
-                        'instructions': instructions + 'Reinspect files and hashes before editing. Include task_id and lease_token on each assigned operation.'}
+                if holder:
+                    code = 'TASK_REVIEW_REQUIRED' if holder['status'] == 'needs_review' else 'TASK_CONFLICT'
+                    raise CoordinationError(
+                        code,
+                        f"Task {holder['id']} is {holder['status']}. Single-assistant mode allows one active assignment; no waiting request was saved.",
+                    )
+                task.update(
+                    agent=agent,
+                    resources=resources,
+                    status='active',
+                    expires_at=self.clock() + 120,
+                    lease_token=secrets.token_urlsafe(32),
+                    revision=task['revision'] + 1,
+                )
+                self.save(data)
+                return {
+                    **self.public(task),
+                    'lease_token': task['lease_token'],
+                    'instructions': 'Assignment is active. Use only the approved operations within its resources. Reinspect files and hashes before editing. Include task_id and lease_token on each assigned operation.',
+                }
             if action in {'renew', 'finish'}:
-                self.validate(task, args.get('lease_token'),waiting=True)
+                self.validate(task, args.get('lease_token'))
                 if action == 'renew':
                     task['expires_at'] = self.clock() + 120
                 else:
-                    if task['status']=='waiting' and args.get('status') not in {'queued','failed'}:
-                        raise CoordinationError('TASK_LEASE_REQUIRED','A waiting assignment has not executed work. Cancel it with failed or queued; do not mark it completed.')
                     if unresolved:
                         raise CoordinationError('TASK_REVIEW_REQUIRED', 'A browser run is uncertain or failed verification. Inspect it and reconcile_task after review before handoff.')
                     if self.running(task['id']):
@@ -180,7 +187,6 @@ class Coordination:
                     if not isinstance(note, str) or len(note) > 2000:
                         raise ValueError('Handoff note exceeds limit')
                     task['note'] = note
-                self.promote(data)
                 self.save(data)
                 return self.public(task)
             if action == 'reconcile':
@@ -191,13 +197,12 @@ class Coordination:
                 task.update(status='queued', resources=[], lease_token='')
                 if getattr(self.commander, '_teaching', None) and self.commander._teaching['task_id'] == task['id']:
                     self.commander._teaching = None
-                self.promote(data)
                 self.save(data)
                 return self.public(task)
             raise ValueError('Unknown task action')
 
-    def validate(self, task, token, *, waiting=False):
-        if task['status'] not in ({'active','waiting'} if waiting else {'active'}) or task['expires_at'] <= self.clock() or not isinstance(token, str) or not secrets.compare_digest(task.get('lease_token', ''), token):
+    def validate(self, task, token):
+        if task['status'] != 'active' or task['expires_at'] <= self.clock() or not isinstance(token, str) or not secrets.compare_digest(task.get('lease_token', ''), token):
             raise CoordinationError('TASK_LEASE_REQUIRED', 'Assignment expired or token does not match. Inspect list_tasks; uncertain operations require reconciliation.')
 
     def running(self, task_id):
@@ -224,7 +229,15 @@ class Coordination:
                 if task is own or task['status'] not in {'active', 'needs_review'}:
                     continue
                 if any(overlaps(a, b) for a in task['resources'] for b in resources):
-                    raise CoordinationError('TASK_CONFLICT', 'Resource reserved by another or uncertain task. Call list_tasks; do not retry the write automatically.')
+                    if task['status'] == 'needs_review':
+                        raise CoordinationError(
+                            'TASK_REVIEW_REQUIRED',
+                            f"Task {task['id']} has an expired or uncertain reservation. Inspect actual file/process/UI state before reconciling; no operation was run.",
+                        )
+                    raise CoordinationError(
+                        'TASK_CONFLICT',
+                        f"Task {task['id']} currently owns this resource (it is reserved). Finish it before retrying; no operation was run.",
+                    )
             marker = self.depth.set(True)
             try:
                 yield
