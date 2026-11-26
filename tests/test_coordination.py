@@ -122,11 +122,21 @@ def test_legacy_waiting_records_are_migrated_and_old_tokens_fenced(pc):
             'queue_order': 2, 'agent': 'old assistant',
             'lease_token': old_token, 'revision': 1, 'note': '',
         }
+        data['tasks']['expired_queue'] = {
+            'id': 'expired_queue', 'title': 'expired legacy queue item',
+            'status': 'queued', 'resources': [], 'expires_at': 9999999999,
+            'queue_order': 1, 'agent': 'old assistant',
+            'lease_token': '', 'revision': 1, 'note': 'handoff details to preserve',
+        }
         store.save(data)
-    legacy = next(task for task in store.task('list')['tasks'] if task['id'] == 'legacy')
+    listed = {task['id']: task for task in store.task('list')['tasks']}
+    legacy = listed['legacy']
+    expired_queue = listed['expired_queue']
     assert legacy['status'] == 'queued'
     assert legacy['resources'] == []
     assert 'agent' not in legacy and 'queue_order' not in legacy
+    assert 'agent' not in expired_queue and 'queue_order' not in expired_queue
+    assert expired_queue['note'] == 'handoff details to preserve'
     with store.store.locked():
         assert store.load()['tasks']['legacy']['lease_token'] == ''
     with pytest.raises(CoordinationError):
