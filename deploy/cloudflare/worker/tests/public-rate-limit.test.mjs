@@ -42,6 +42,21 @@ test('different gateway instances share registration budgets and cannot bypass t
   assert.doesNotMatch(JSON.stringify([...f.objects.keys()]),/192\.0\.2|bypass|Forwarded/);
 });
 
+test('limiter logs bounded failure diagnostics while failing closed without exposing secrets',async()=>{
+  const f=fixture(),events=[],original=console.error;
+  f.env.DEVICES.get=()=>({fetch:async()=>{throw Object.assign(Error('private-secret-and-ip'),{name:'SyntheticStorageError'});}});
+  console.error=(...args)=>events.push(args);
+  try {
+    const denied=await publicRateLimit(f.request('/authorize'),f.env);
+    assert.equal(denied.status,503);
+    assert.equal(events.length,1);
+    assert.equal(events[0][0],'PCRC_ABUSE_LIMITER_UNAVAILABLE');
+    assert.deepEqual(events[0][1],{errorName:'SyntheticStorageError'});
+    assert.doesNotMatch(JSON.stringify(events),/private-secret|192\\.0/);
+    assert.doesNotMatch(await denied.text(),/private-secret|192\\.0/);
+  } finally {console.error=original;}
+});
+
 test('limiter uses trusted edge IP and fails closed without exposing error details',async()=>{
   const f=fixture();
   f.env.DEVICES.get=()=>({fetch:async()=>{throw Error('private-secret-and-ip');}});

@@ -142,7 +142,7 @@ export async function authorization(request: Request,env:AuthEnv,fetcher:typeof 
       // The GitHub token is only used for sign-in; never persist or forward it.
       stage='authorization-complete';
       const accountId=await resolveGitHubAccount(env,String(user.id));
-      const {redirectTo}=await oauth.completeAuthorization({request:recovered.request,userId:accountId,metadata:{label:'PC Remote Commander account'},scope:recovered.request.scope,props:{...(accountId===String(user.id)?{githubId:accountId}:{accountId}),authVersion:env.DEVICES?(await deviceStore(env,'/account/auth-version',{},accountId)).authVersion:0,...confirmationProps(recovered.request,hasControlScope(recovered.request.scope)&&nativeConfirmationHost(recovered.request.redirectUri)?await oauth.describeConsent(recovered.request):undefined)}});
+      const {redirectTo}=await oauth.completeAuthorization({request:recovered.request,userId:accountId,metadata:{label:'PC Remote Commander account'},scope:recovered.request.scope,props:{...(accountId===String(user.id)?{githubId:accountId}:{accountId,githubId:String(user.id)}),authVersion:env.DEVICES?(await deviceStore(env,'/account/auth-version',{},accountId)).authVersion:0,...confirmationProps(recovered.request,hasControlScope(recovered.request.scope)&&nativeConfirmationHost(recovered.request.redirectUri)?await oauth.describeConsent(recovered.request):undefined)}});
       chatGptCallbackEvidence(recovered.request,redirectTo,settings.publicOrigin);
       recovered.headers.set('Location',redirectTo);
       recovered.headers.set('Referrer-Policy','no-referrer');

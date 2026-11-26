@@ -45,7 +45,11 @@ async function enforceBudget(group:string,principal:string,env:Settings):Promise
     if(result.status===204)return null;
     const retry=Number(result.headers.get('Retry-After'));
     if(result.status===429&&Number.isInteger(retry)&&retry>=1&&retry<=3600)return deny(429,retry);
-  } catch { /* Counter outages must not bypass the budget. */ }
+  } catch(error) {
+    const candidate=error instanceof Error?error.name:'UnknownError';
+    const errorName=/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(candidate)?candidate:'UnknownError';
+    console.error('PCRC_ABUSE_LIMITER_UNAVAILABLE',{errorName});
+  }
   return deny(503,10);
 }
 export async function consumePublicBudget(request:Request,storage:DurableObjectStorage):Promise<Response> {

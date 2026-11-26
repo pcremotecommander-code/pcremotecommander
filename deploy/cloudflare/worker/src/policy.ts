@@ -1,6 +1,7 @@
 import {CONTROL_CATALOG_READ_TOOLS} from './relay_protocol.ts';
 /** Strict, independently testable policy around the OAuth library and origin. */
-import {authenticatedGitHubId,authenticatedAccountId,permittedAccount,validBetaIds} from './account_identity.ts';
+import {authenticatedGitHubId,permittedAccount,validBetaIds} from './account_identity.ts';
+import {createVerifiedIdentityContext,resolveSharedPcrcIdentity,supabaseAuthIssuerFromUrl} from './shared_identity.ts';
 import {approvalPreview,includeApprovalPreview} from './approval_preview.ts';
 import {readActionResult} from './action_result.ts';
 import {approvalCardUri,approvalCardResult,approvalCardResource,includeApprovalCard} from './approval_card.ts';
@@ -36,6 +37,9 @@ export interface Settings {
   SUPABASE_PUBLISHABLE_KEY?: string;
   PCRC_EMAIL_AUTH_ENABLED?: string;
   PCRC_PUBLIC_SITE_ORIGIN?: string;
+  /** Private Cloudflare Service Binding; disabled unless PCRC_SHARED_IDENTITY_ENABLED=1. */
+  PCRC_IDENTITY_STORE?: Fetcher;
+  PCRC_SHARED_IDENTITY_ENABLED?: string;
   OAUTH_KV?: KVNamespace;
   DEVICES?: DurableObjectNamespace;
   BILLING_SERVICE?: Fetcher;
@@ -120,6 +124,8 @@ export function config(env: Settings) {
   if (!/^[A-Za-z0-9_-]{43,128}$/.test(env.JAN_PROXY_KEY)) throw new Error('Invalid private proxy credential');
   if (!permittedAccount(env.ALLOWED_GITHUB_ID,env.ALLOWED_GITHUB_ID) || !/^[A-Za-z0-9_]{8,64}$/.test(env.GITHUB_CLIENT_ID) || (typeof env.GITHUB_CLIENT_SECRET!=='string' || env.GITHUB_CLIENT_SECRET.length<16 || env.GITHUB_CLIENT_SECRET.length>256) || ![undefined,'0','1'].includes(env.JAN_MULTI_USER_ENABLED) || ![undefined,'public','owner'].includes(env.JAN_SITE_ROLE) || env.JAN_BETA_GITHUB_IDS!==undefined&&(env.JAN_MULTI_USER_ENABLED!=='1'||!validBetaIds(env.JAN_BETA_GITHUB_IDS,env.ALLOWED_GITHUB_ID))) throw new Error('Owner authentication not configured');
   if(env.PCRC_OWNER_GITHUB_ID!==undefined&&authenticatedGitHubId(env.PCRC_OWNER_GITHUB_ID,env.PCRC_OWNER_GITHUB_ID)!==env.PCRC_OWNER_GITHUB_ID)throw new Error('Invalid owner GitHub identity');
+  if(![undefined,'0','1'].includes(env.PCRC_SHARED_IDENTITY_ENABLED) ||
+    env.PCRC_SHARED_IDENTITY_ENABLED==='1'&&!env.PCRC_IDENTITY_STORE)throw new Error('Shared identity resolver is not configured');
   return {publicOrigin:publicUrl.origin,origin:origin.origin,resource:publicUrl.origin+'/mcp'};
 }
 const ORIGIN_RECORD='jan:active-origin:v1';
@@ -243,14 +249,26 @@ function unavailable(body: Uint8Array, code='ORIGIN_UNAVAILABLE', portal=''): Re
 }
 export async function proxyMcp(request: Request, env: Settings, auth: {audience?:string;scope?:string[];userId?:string}, props: {githubId?:string;accountId?:string;authVersion?:number;confirmationHost?:unknown;confirmationVerified?:unknown}, fetcher: typeof fetch=fetch): Promise<Response> {
   const settings=config(env);
-  const accountId=permittedAccount(authenticatedAccountId(auth.userId,props?.accountId??props?.githubId),env.ALLOWED_GITHUB_ID,env.JAN_MULTI_USER_ENABLED,env.JAN_BETA_GITHUB_IDS);
-  if (auth.audience!==settings.resource || !accountId || !hasReadScope(auth.scope)) return failure(403,'Owner or scope denied');
+  const identity=createVerifiedIdentityContext(auth,props,{
+    resource:settings.resource,ownerGithubId:env.ALLOWED_GITHUB_ID,
+    multiUserEnabled:env.JAN_MULTI_USER_ENABLED,betaGithubIds:env.JAN_BETA_GITHUB_IDS,
+    supabaseAuthIssuer:supabaseAuthIssuerFromUrl(env.SUPABASE_URL)??undefined,
+  });
+  const accountId=identity?.accountId??null;
+  if(!identity||!accountId) return failure(403,'Owner or scope denied');
+  if(env.PCRC_SHARED_IDENTITY_ENABLED==='1') {
+    try {
+      const mapped=await resolveSharedPcrcIdentity(env.PCRC_IDENTITY_STORE!,identity);
+      if(!mapped||mapped.accountId!==accountId)return failure(403,'Shared account identity denied');
+    } catch {
+      return failure(503,'Shared account identity temporarily unavailable');
+    }
+  }
   if(env.DEVICES) {
     const current=await deviceState(env,accountId,'/account/auth-version',{}).catch(()=>null);
     if(!current||!Number.isSafeInteger(current.authVersion)||current.authVersion<0)return failure(503,'Authentication state temporarily unavailable. Retry shortly.');
     if(current.resetting)return failure(503,'Password recovery is in progress. Reconnect after it completes.');
     if(!Number.isSafeInteger(props.authVersion??0)||current.authVersion!==(props.authVersion??0))return failure(401,'Sign-in changed. Reconnect PCRC in your assistant.');
-    const limited=await authenticatedMcpRateLimit(accountId,env);if(limited)return limited;
   }
   const nativeHost=hasControlScope(auth.scope)&&(props.confirmationHost==='chatgpt'||props.confirmationHost==='claude')?props.confirmationHost:null;
   const url=new URL(request.url);
@@ -279,6 +297,10 @@ export async function proxyMcp(request: Request, env: Settings, auth: {audience?
     console.warn('PC_REMOTE_MCP_REJECTED',JSON.stringify({method:methodName}));
     return failure(400,'Invalid or unsupported MCP message');
   }
+  if(env.DEVICES&&!toolCall) {
+    const limited=await authenticatedMcpRateLimit(accountId,env);
+    if(limited)return limited;
+  }
   const version=request.headers.get('mcp-protocol-version');
   if(version && !/^\d{4}-\d{2}-\d{2}$/.test(version)) return failure(400,'Invalid protocol header');
   const requested=JSON.parse(new TextDecoder().decode(body));
@@ -295,10 +317,11 @@ export async function proxyMcp(request: Request, env: Settings, auth: {audience?
       const stub=env.DEVICES.get(env.DEVICES.idFromName(accountId));
       const counted=await stub.fetch('https://internal.invalid/usage/increment',{method:'POST',headers:{'Content-Type':'application/json','X-Jan-Account-Id':accountId},body:'{}'});
       if(counted.status===429){
-        const detail=await counted.json() as {resetsAt?:number};
+        const detail=await counted.json() as {resetsAt?:number;retryAfter?:number};
         const monthly=Number.isFinite(detail.resetsAt)&&detail.resetsAt!>Date.now();
-        const response=failure(429,monthly?'Monthly tool-call limit reached; resets on '+new Date(detail.resetsAt!).toISOString().slice(0,10)+' UTC':'Account tool-call limit reached; retry in one minute');
-        response.headers.set('Retry-After',monthly?String(Math.ceil((detail.resetsAt!-Date.now())/1000)):'60');
+        const hourly=Number.isInteger(detail.retryAfter)&&detail.retryAfter!>0;
+        const response=failure(429,monthly?'Monthly tool-call limit reached; resets on '+new Date(detail.resetsAt!).toISOString().slice(0,10)+' UTC':hourly?'Hourly tool-call limit reached; retry shortly':'Account tool-call limit reached; retry in one minute');
+        response.headers.set('Retry-After',monthly?String(Math.ceil((detail.resetsAt!-Date.now())/1000)):hourly?String(detail.retryAfter):'60');
         return response;
       }
       if(!counted.ok&&env.JAN_SITE_ROLE==='public')return failure(503,'Usage service unavailable');

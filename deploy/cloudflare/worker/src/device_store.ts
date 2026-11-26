@@ -908,8 +908,12 @@ export class JanDeviceStore {
         const window=await tx.get<{started:number;count:number}>('usage:minute:v1')??{started:now,count:0};
         if(now-window.started>=60000){window.started=now;window.count=0;}
         if(window.count>=120)return json({error:'Account tool-call rate limit reached'},429);
-        window.count++;
+        const hour=await tx.get<{started:number;count:number}>('usage:hour:v1')??{started:now,count:0};
+        if(now-hour.started>=3600000){hour.started=now;hour.count=0;}
+        if(hour.count>=6000)return json({error:'Hourly tool-call rate limit reached',retryAfter:Math.max(1,Math.ceil((hour.started+3600000-now)/1000))},429);
+        window.count++;hour.count++;
         await tx.put('usage:minute:v1',window);
+        await tx.put('usage:hour:v1',hour);
         const total=(await tx.get<number>('calls')??0)+1;
         await tx.put('calls',total);
         const day=new Date(now).toISOString().slice(0,10);

@@ -3,12 +3,11 @@ import OAuthProvider,{getOAuthApi} from '@cloudflare/workers-oauth-provider';
 import type {OAuthHelpers,OAuthResourceContext,OAuthProviderOptions} from '@cloudflare/workers-oauth-provider';
 import {authorization} from './authorization.ts';
 import {config,failure,proxyMcp,boundedBody,registerOrigin,registerDeviceOrigin,type Settings} from './policy.ts';
-import {portal,maintainAccounts} from './device_portal.ts';
+import {portal,maintainAccounts,deviceStore,DeviceStateError} from './device_portal.ts';
 import {accountFromDeviceProof} from './account_identity.ts';
 import {siteRouteAllowed} from './site_role.ts';
 import {downloadPackage} from './package_download.ts';
 import {verifiedSubscriptionEvent,pricingConfiguration} from './billing.ts';
-import {deviceStore} from './device_portal.ts';
 import {internalBillingHistory} from './billing_history.ts';
 import {publicRateLimit} from './public_rate_limit.ts';
 import {checkTransferRequest} from './transfer_access.ts';
@@ -51,9 +50,13 @@ export default {
       const result=await maintainAccounts({...env,OAUTH_PROVIDER:getOAuthApi(oauthOptions(env),env)});
       await deviceStore(env,'/directory/maintenance-report',{success:true,...result});
       console.log('PCRC_ACCOUNT_MAINTENANCE',JSON.stringify(result));
-    } catch {
+    } catch(error) {
+      const candidate=error instanceof Error?error.name:'UnknownError';
+      const errorName=/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(candidate)?candidate:'UnknownError';
+      const deviceStateStatus=error instanceof DeviceStateError&&Number.isInteger(error.status)?error.status:null;
+      console.error('PCRC_ACCOUNT_MAINTENANCE_FAILED',{errorName,deviceStateStatus});
       try {await deviceStore(env,'/directory/maintenance-report',{success:false});} catch {}
-      console.error('PCRC_ACCOUNT_MAINTENANCE_FAILED');throw Error('Account maintenance failed');
+      throw Error('Account maintenance failed');
     }
   },
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response> {
@@ -69,6 +72,10 @@ export default {
     const path=new URL(request.url).pathname;
     if (/^\/mcp\/(?:perplexity|emergent)(?:\/index\.html|\/)?$/.test(path)) return failure(410, "This setup guide has been removed.");
     if(!siteRouteAllowed(env.JAN_SITE_ROLE,path,new URL(request.url).searchParams.get('state')?.startsWith('janportal.')===true))return failure(404,'Unavailable');
+    if(path==='/livez'&&env.JAN_SITE_ROLE==='public') {
+      if(request.method!=='GET'||new URL(request.url).search)return failure(400,'Invalid liveness request');
+      return Response.json({service:'pcrc',status:'alive'},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+    }
     const limited=path==='/mcp'?null:await publicRateLimit(request,env);
     if(limited)return limited;
     if (path!=='/mcp'&&!allowed(request)) return failure(429,'Rate limit reached');

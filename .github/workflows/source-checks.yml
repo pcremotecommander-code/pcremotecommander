@@ -2,9 +2,9 @@ name: Source checks
 
 on:
   push:
-    branches: [main, next, release/beta49-single-assistant-rc1]
+    branches: [main, next, release/beta49-single-assistant-rc1, integration/beta49.1-worker-hardening]
   pull_request:
-    branches: [main, next, release/beta49-stable]
+    branches: [main, next, release/beta49-stable, release/beta49-single-assistant-rc1, release/beta49.1-product-version-sync-rc1]
   workflow_dispatch:
 
 permissions:
