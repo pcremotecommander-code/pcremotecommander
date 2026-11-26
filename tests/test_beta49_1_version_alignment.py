@@ -8,6 +8,16 @@ NPM_VERSION = "0.7.0-beta.49.1"
 PYTHON_VERSION = "0.7.0b49.post1"
 
 
+def test_current_release_docs_use_beta49_1_and_single_assistant_semantics():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    skills = (ROOT / "docs/skills.md").read_text(encoding="utf-8")
+    assert "Current product release: PCRC Beta.49.1" in readme
+    assert "one active task assignment" in readme
+    assert "TASK_CONFLICT" in readme
+    assert "0.7.0-beta.49.1" in skills
+    assert "0.7.0-beta.48" not in skills
+
+
 def test_beta49_1_release_metadata_is_aligned():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["project"]["version"] == PYTHON_VERSION
