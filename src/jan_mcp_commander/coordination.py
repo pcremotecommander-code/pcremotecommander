@@ -184,8 +184,16 @@ class Coordination:
                 self.save(data)
                 return self.public(task)
             if action == 'reconcile':
-                if not (task['status'] == 'needs_review' or task['status'] == 'active' and unresolved) or args.get('reviewed') is not True or self.running(task['id']):
-                    raise CoordinationError('TASK_REVIEW_REQUIRED', 'Inspect the uncertain task, stop any owned process, then confirm reconciliation. No action will be replayed.')
+                if not (task['status'] == 'needs_review' or task['status'] == 'active' and unresolved) or args.get('reviewed') is not True:
+                    raise CoordinationError(
+                        'TASK_REVIEW_REQUIRED',
+                        'Task is not in a reconcilable state or explicit review was not confirmed. Inspect list_tasks and actual results; no action will be replayed.',
+                    )
+                if self.running(task['id']):
+                    raise CoordinationError(
+                        'TASK_PROCESS_RUNNING',
+                        'A task-owned process is still running. Stop it and inspect its output before reconciliation; no action will be replayed.',
+                    )
                 for run in unresolved:
                     run['status'] = 'abandoned_after_review'
                 task.update(status='queued', resources=[], lease_token='')
