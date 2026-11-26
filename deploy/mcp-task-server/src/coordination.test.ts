@@ -19,9 +19,6 @@ test('MCP clients receive immediate single-assistant conflicts without creating 
     control: true,
     capabilities: 'files',
   });
-  if (previous === undefined) delete process.env.JAN_MCP_STATE_DIR;
-  else process.env.JAN_MCP_STATE_DIR = previous;
-
   const connect = async (name: string) => {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     const server = createTaskServer(service, { control: true, capabilities: new Set(['files']) });
@@ -93,6 +90,8 @@ test('MCP clients receive immediate single-assistant conflicts without creating 
     await a.server.close();
     await b.server.close();
     await service.close();
+    if (previous === undefined) delete process.env.JAN_MCP_STATE_DIR;
+    else process.env.JAN_MCP_STATE_DIR = previous;
     await rm(root, { recursive: true, force: true });
   }
 });
