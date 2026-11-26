@@ -287,6 +287,7 @@ def test_failed_workflow_requires_review_before_task_release_and_new_lease(pc):
 def test_reconciliation_reports_running_process_without_releasing_reservation(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
+    pc._coordination = store
     lease = claim(store, 'interrupted process', ['workspace'])
     process = assigned(lease, lambda: pc.start_program(sys.executable, ['-c', 'import time; time.sleep(30)']))
     now[0] += 121
