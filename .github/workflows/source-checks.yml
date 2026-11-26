@@ -88,6 +88,11 @@ jobs:
         env:
           JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
         run: node --test deploy/mcp-task-server/dist/bridge.test.js deploy/mcp-task-server/dist/catalog.test.js
+      - name: MCP task coordination integration tests (Linux)
+        if: runner.os == 'Linux'
+        env:
+          JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: node --test deploy/mcp-task-server/dist/coordination.test.js
 
   dependency-review:
     name: Dependency Review
