@@ -27,6 +27,14 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def install_bundle_dependencies(destination: Path) -> None:
+    subprocess.run(
+        ["npm.cmd", "install", "--ignore-scripts", "--no-audit", "--no-fund"],
+        cwd=destination,
+        check=True,
+    )
+
+
 def install_pillow(destination,manifest):
     pillow=PILLOW_WHEEL.read_bytes()
     if hashlib.sha256(pillow).hexdigest()!=PILLOW_SHA256:raise ValueError('Pillow dependency checksum mismatch')
@@ -136,6 +144,7 @@ def build(base: Path, destination: Path) -> dict:
         raise ValueError("Task MCP server build did not produce main.js")
     (task_target / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
     manifest["deploy/mcp-task-server/package.json"] = digest(task_target / "package.json")
+    task_metadata = json.loads((task_source / "package.json").read_text(encoding="utf-8"))
     package = {
         "name": NAME,
         "version": VERSION,
@@ -144,12 +153,14 @@ def build(base: Path, destination: Path) -> dict:
         "bin": {NAME: "bin/npx-onboard.cjs"},
         "os": ["win32"],
         "engines": {"node": ">=20"},
-        "dependencies": {"ws": "8.22.0", **json.loads((task_source / "package.json").read_text(encoding="utf-8"))["dependencies"]},
+        "dependencies": {"ws": "8.22.0", **task_metadata["dependencies"]},
+        "overrides": task_metadata.get("overrides", {}),
         "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod"],
         "publishConfig": {"access": "public", "tag": "beta"},
         "files": ["bin", "project", "runtime", "SOURCE-MANIFEST.json"],
     }
     (destination / "package.json").write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+    install_bundle_dependencies(destination)
     shutil.copy2(ROOT / "deploy/npm/launcher/LICENSE.txt", destination / "LICENSE.txt")
     (destination / "README.md").write_text(
         "# PC Remote Commander Windows beta\n\n"
