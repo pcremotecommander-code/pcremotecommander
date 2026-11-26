@@ -154,8 +154,7 @@ def build(base: Path, destination: Path) -> dict:
         "os": ["win32"],
         "engines": {"node": ">=20"},
         "dependencies": {"ws": "8.22.0", **task_metadata["dependencies"]},
-        "overrides": task_metadata.get("overrides", {}),
-        "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod"],
+        "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod", "hono", "@hono/node-server"],
         "publishConfig": {"access": "public", "tag": "beta"},
         "files": ["bin", "project", "runtime", "SOURCE-MANIFEST.json"],
     }
