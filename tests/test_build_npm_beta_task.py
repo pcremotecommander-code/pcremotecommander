@@ -52,7 +52,11 @@ def test_beta_package_contains_task_server_and_runtime_dependencies(tmp_path,mon
     package = json.loads((destination / "package.json").read_text(encoding="utf-8"))
     assert not list(destination.rglob("*.pyc"))
     assert package["version"] == build_npm_beta.VERSION
-    assert package["overrides"] == {"hono": "4.13.22", "@hono/node-server": "2.1.11"}
+    assert package["dependencies"]["hono"] == "4.13.22"
+    assert package["dependencies"]["@hono/node-server"] == "2.1.11"
+    assert "hono" in package["bundleDependencies"]
+    assert "@hono/node-server" in package["bundleDependencies"]
+    assert "overrides" not in package
     assert package["license"] == "SEE LICENSE IN LICENSE.txt"
     assert (destination / "LICENSE.txt").read_bytes() == (ROOT / "deploy/npm/launcher/LICENSE.txt").read_bytes()
     assert build_npm_beta.VERSION in (destination / "project/src/jan_mcp_commander/__init__.py").read_text()
