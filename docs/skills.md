@@ -39,7 +39,7 @@ The portable collection covers computer operations, workspace files, browser wor
 
 With a compatible CLI and gateway, the `file-transfer` skill walks you through copying one file on a trusted local network. Both devices must appear Online on the same PCRC Devices dashboard and have approved file access. Your account must support two enrolled computers. Open **Device details & access** on each device to find its ID. Connect both to the same trusted router over Wi-Fi or Ethernet and use their private IPv4 addresses.
 
-Open a terminal on the receiving PC while its launcher stays running. Replace the example workspace, addresses and device ID with yours. If you use npx, start each command with `npx --yes pcremotecommander@beta`. For a test pinned to this release, use `npx --yes pcremotecommander@0.7.0-beta.48`.
+Open a terminal on the receiving PC while its launcher stays running. Replace the example workspace, addresses and device ID with yours. If you use npx, start each command with `npx --yes pcremotecommander@beta`. For a test pinned to this release, use `npx --yes pcremotecommander@0.7.0-beta.49.1`.
 
 ```text
 pcremotecommander cli --workspace "C:/PCRC-Workspace" transfer receive --bind-ip 192.168.1.20 --peer-ip 192.168.1.10 --peer-device 11000000-0000-4000-8000-000000000001 --destination incoming.zip
