@@ -297,7 +297,12 @@ test('computer use skill is discoverable without granting computer access',async
   const content=resource.contents[0];
   assert.ok(content && 'text' in content);
   assert.equal(content.text,'# Synthetic PCRC Computer Use');
-  assert.ok((await client.listPrompts()).prompts.some(p=>p.name==='monitor_app_task'));
+  const prompts=(await client.listPrompts()).prompts;
+  assert.ok(prompts.some(p=>p.name==='monitor_app_task'));
+  const coordination=prompts.find(p=>p.name==='coordinate_assistants');
+  assert.ok(coordination);
+  assert.match(coordination.description!,/single connected AI assistant/i);
+  assert.doesNotMatch(coordination.description!,/up to eight|FIFO|waiting claims/i);
  } finally {await client.close();await server.close();}
 });
 
