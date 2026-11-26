@@ -1,5 +1,7 @@
 # PC Remote Commander · PCRC
 
+**Current product release: PCRC Beta.49.1** (`0.7.0-beta.49.1` for Node packages; Python package metadata uses the PEP 440 equivalent `0.7.0b49.post1`).
+
 **Use a compatible AI assistant with your own Windows PC.** PCRC connects the assistant to approved files, commands, a controlled browser and desktop actions, with device access managed in one dashboard.
 
 [Website](https://pc-remote-commander.pcremotecommander.workers.dev/) · [Dashboard](https://pc-remote-commander.pcremotecommander.workers.dev/devices) · [Step-by-step setup](docs/install.md) · [npm](https://www.npmjs.com/package/pcremotecommander)
@@ -13,17 +15,17 @@ Choose PCRC when the missing piece is **access to the computer you need to work 
 - **Use the chat client you prefer.** Connect a compatible ChatGPT, Claude or Cursor client to your paired PC. Ask it to inspect a local test failure, update an approved document or work with a supported interface without manually transferring each result into chat.
 - **Choose the computer centrally.** Pair computers to your account, select which online device receives new requests, inspect usage and revoke its access from the dashboard. Keep the selected PC's agent running.
 - **Combine files, terminal and visual tasks.** For example, inspect a project configuration, run an approved check, then inspect its browser output. Capabilities and confirmations still apply to every operation.
-- **Build with two or three AI assistants.** Let one assistant implement a feature, another write tests, and a third review the result. Connect each compatible client and divide work with PCRC task assignments. Up to three active assignments can reserve separate file areas; participating tools reject conflicting writes and stale hashes. You manage assignments and handoffs—PCRC does not automatically launch models, merge every change or lock out unrelated programs/manual edits.
+- **Single-assistant task control.** Connect one compatible assistant to the selected PC. PCRC allows one active task assignment at a time; conflicting claims return `TASK_CONFLICT` rather than entering a FIFO waiting queue. Expired or uncertain work remains protected until its process state is reviewed. Reservations cover participating PCRC operations, not unrelated programs or manual edits.
 - **Recover supported file changes.** Reviewed text-edit/delete operations create recovery backups. Inspect a preview and current hash before changing important data; keep your own backups too.
 
 ### A practical comparison
 
 | Your situation | Best starting point | Reason |
 | --- | --- | --- |
-| You want to build, debug and test with your preferred AI | PCRC with a compatible assistant | Connect Codex and Claude Code to the same PCRC MCP server using your account. Give each assistant a separate task: one implements a feature while the other writes tests or reviews it. Use PCRC task assignments to coordinate handoffs and block conflicting writes among participating tools. |
+| You want to build, debug and test with your preferred AI | PCRC with one compatible assistant | Connect your preferred compatible client to the same PCRC MCP server using your account. PCRC enforces one active assignment and rejects conflicting claims with `TASK_CONFLICT`; it does not silently queue another assistant's work. |
 | You want a preferred MCP chat client to act on an account-paired PC | PCRC remote MCP | PCRC supplies the computer-access layer, selected-device routing and revocation; your AI client supplies the reasoning. |
 | You know the exact local operation and want a command interface | PCRC CLI | Invoke a supported local operation or get workflow guidance without treating the CLI as an autonomous assistant. |
-| You use multiple assistants on the same workspace | PCRC task assignments | Explicit reservations and handoffs reduce collisions among cooperating tools; uncertain results require review rather than automatic replay. |
+| You want to continue after an interrupted task | PCRC task review | Expired or uncertain task state remains protected until its process state is checked and reviewed; PCRC does not automatically replay uncertain work. |
 
 There is overlap. Codex and Claude Code also support integrations and broader workflows; PCRC does not claim exclusive computer use, remote access, superior reasoning, or fewer security requirements. It can complement a coding agent. Read the current [Codex CLI guide](https://learn.chatgpt.com/docs/codex/cli) and [Claude Code overview](https://code.claude.com/docs/en/overview).
 

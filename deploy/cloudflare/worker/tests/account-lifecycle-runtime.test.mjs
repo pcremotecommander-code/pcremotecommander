@@ -25,7 +25,7 @@ test('real OAuth grant is revoked by self-service deletion without removing anot
   const post=(path,fields,cookies)=>call(path,{method:'POST',headers:{Cookie:cookies,Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields)});
   try {
     const health=await call('/healthz');assert.equal(health.status,200);
-    assert.deepEqual(await health.json(),{service:'pcrc',status:'ok'});
+    assert.deepEqual(await health.json(),{service:'pcrc',status:'ok',version:'0.7.0-beta.49.1'});
     const userCookie=await login(5678),otherCookie=await login(9876);
     const register=await call('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'Deletion regression client',redirect_uris:['https://client.example/callback'],grant_types:['authorization_code'],response_types:['code'],token_endpoint_auth_method:'none'})});
     const client=await register.json(),verifier='V'.repeat(64);

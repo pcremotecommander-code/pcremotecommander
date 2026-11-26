@@ -13,6 +13,7 @@ import {internalBillingHistory} from './billing_history.ts';
 import {publicRateLimit} from './public_rate_limit.ts';
 import {checkTransferRequest} from './transfer_access.ts';
 import {PUBLIC_SCOPES,SUPPORTED_SCOPES} from './oauth_scopes.ts';
+import {PCRC_RELEASE_VERSION} from './release.ts';
 export {JanDeviceStore} from './device_store.ts';
 interface Env extends Settings {OAUTH_KV:KVNamespace;OAUTH_PROVIDER:OAuthHelpers;DEVICES:DurableObjectNamespace;PACKAGE_BUCKET?:R2Bucket;}
 function oauthOptions(env:Env):OAuthProviderOptions<Env> {
@@ -76,7 +77,7 @@ export default {
       try {
         const result=await env.DEVICES.get(env.DEVICES.idFromName('service:health:v1')).fetch('https://internal.invalid/health/check');
         if(result.status!==204)throw Error();
-        return Response.json({service:'pcrc',status:'ok'},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+        return Response.json({service:'pcrc',status:'ok',version:PCRC_RELEASE_VERSION},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
       } catch {return failure(503,'Service unavailable');}
     }
     if(path==='/billing/paddle/webhook') {
