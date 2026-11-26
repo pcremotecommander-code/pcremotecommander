@@ -84,10 +84,10 @@ jobs:
         run: node --test deploy/npm/launcher/tests/*.test.cjs
       - name: Build MCP test client
         run: npm run build --prefix deploy/mcp-task-server
-      - name: MCP bridge and catalog unit tests
+      - name: MCP bridge, catalog and coordination tests
         env:
           JAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
-        run: node --test deploy/mcp-task-server/dist/bridge.test.js deploy/mcp-task-server/dist/catalog.test.js
+        run: node --test deploy/mcp-task-server/dist/bridge.test.js deploy/mcp-task-server/dist/catalog.test.js deploy/mcp-task-server/dist/coordination.test.js
 
   dependency-review:
     name: Dependency Review
