@@ -9,7 +9,7 @@ test('public pages share an accessible footer and local motion assets',()=>{
   let footer;
   for(const path of htmlFiles){
     const page=readFileSync(new URL(path,publicRoot),'utf8');
-    const current=page.match(/<footer class="site-footer"[\s\S]*?<\/footer>/)?.[0];
+    const current=page.match(/<footer class="site-footer"[\s\S]*?<\/footer>/)?.[0]?.replace(/\r\n/g,"\n");
     assert.ok(current,path);footer??=current;assert.equal(current,footer,path);
     for(const group of ['Product','Resources','Legal'])assert.ok(current.includes(`aria-label="${group} links"`),path);
     assert.match(current,/id="reduce-motion"/);assert.match(current,/href="\/sitemap\/"/);
