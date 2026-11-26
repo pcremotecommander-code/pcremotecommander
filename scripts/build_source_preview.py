@@ -56,7 +56,7 @@ def build(destination: Path) -> dict:
     contents = [(path.relative_to(ROOT).as_posix(), path.read_bytes()) for path in paths]
     manifest = {
         "kind": "private-source-preview",
-        "version": "0.7.0rc1",
+        "version": "0.7.0b49.post1",
         "standalone": False,
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in contents},
     }
