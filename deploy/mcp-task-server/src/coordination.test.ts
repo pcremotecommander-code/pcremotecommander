@@ -49,7 +49,7 @@ test('MCP clients receive immediate single-assistant conflicts without creating 
     assert.equal(leaseA.status, 'active');
 
     const blocked = await call(b.client, 'claim_task', {
-      task_id: taskB.id, agent: 'same-assistant', resources: ['file:b.txt'], confirmed: true,
+      task_id: taskB.id, agent: 'same-assistant', resources: ['file:b.txt'], wait: true, confirmed: true,
     });
     assert.equal((blocked.structuredContent as { error_code: string }).error_code, 'TASK_CONFLICT');
 
