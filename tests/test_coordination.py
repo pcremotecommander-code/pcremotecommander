@@ -32,110 +32,154 @@ def assigned(task, call):
         assignment.reset(marker)
 
 
-def test_immediate_claim_respects_review_without_entering_the_waiting_queue(pc):
+
+def test_claim_reports_review_required_for_expired_reservation_without_queueing(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     holder = claim(store, 'Previous workspace operation', ['workspace'])
     now[0] += 121
     task = store.task('create', title='Open approved app')
-    target = dict(task_id=task['id'], agent='Interactive', resources=['ui'], wait=False)
+    target = dict(task_id=task['id'], agent='Interactive', resources=['ui'])
     with pytest.raises(CoordinationError) as error:
         store.task('claim', **target)
-    assert error.value.code == 'TASK_CONFLICT'
+    assert error.value.code == 'TASK_REVIEW_REQUIRED'
     current = {item['id']: item for item in store.task('list')['tasks']}
-    assert current[task['id']] == task
+    assert current[task['id']]['status'] == 'queued'
     assert current[holder['id']]['status'] == 'needs_review'
     store.task('reconcile', task_id=holder['id'], reviewed=True)
     assert store.task('claim', **target)['status'] == 'active'
 
 
-def test_eight_assignments_and_capacity_queue_promote_after_release(pc):
-    store=coordinator(pc)
-    active=[claim(store,str(i),[f'file:{i}.txt']) for i in range(8)]
-    assert all(task['status']=='active' for task in active)
-    waiting=claim(store,'ninth',['file:ninth.txt'])
-    assert waiting['status']=='waiting'
-    with pytest.raises(CoordinationError):
-        assigned(waiting,lambda:pc.write_text('ninth.txt','not authorized yet'))
-    store.task('finish',task_id=active[0]['id'],lease_token=active[0]['lease_token'],status='completed')
-    assert store.task('renew',task_id=waiting['id'],lease_token=waiting['lease_token'])['status']=='active'
-    assigned(waiting,lambda:pc.write_text('ninth.txt','assigned after release'))
+def test_single_assistant_mode_allows_only_one_active_assignment(pc):
+    store = coordinator(pc)
+    first = claim(store, 'first', ['file:first.txt'])
+    second = store.task('create', title='second')
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=second['id'], agent='second', resources=['file:second.txt'])
+    assert error.value.code == 'TASK_CONFLICT'
+    current = {item['id']: item for item in store.task('list')['tasks']}
+    assert current[first['id']]['status'] == 'active'
+    assert current[second['id']]['status'] == 'queued'
+    store.task('finish', task_id=first['id'], lease_token=first['lease_token'], status='completed')
+    assigned_second = store.task('claim', task_id=second['id'], agent='second', resources=['file:second.txt'])
+    assert assigned_second['status'] == 'active'
 
 
-def test_same_file_queue_is_fifo_persistent_and_never_replays_stale_edits(pc):
-    store=coordinator(pc)
-    first=claim(store,'first',['file:shared.txt'])
-    second=claim(store,'second',['file:shared.txt'])
-    third=claim(store,'third',['file:shared.txt'])
-    independent=claim(store,'independent',['file:other.txt'])
-    assert [second['status'],third['status'],independent['status']]==['waiting','waiting','active']
-    assigned(first,lambda:pc.write_text('shared.txt','before'))
-    stale=hashlib.sha256(b'before').hexdigest()
-    assigned(first,lambda:pc.edit_text('shared.txt','before','first result',stale,False))
-    store.task('finish',task_id=first['id'],lease_token=first['lease_token'],status='completed')
-    reopened=Coordination(pc)
-    assert reopened.task('renew',task_id=second['id'],lease_token=second['lease_token'])['status']=='active'
-    assert reopened.task('renew',task_id=third['id'],lease_token=third['lease_token'])['status']=='waiting'
+def test_conflicting_claims_return_immediately_and_do_not_create_waiters(pc):
+    store = coordinator(pc)
+    first = claim(store, 'first', ['file:shared.txt'])
+    second = store.task('create', title='second')
+    independent = store.task('create', title='independent')
+    for task, resource_name in ((second, 'file:shared.txt'), (independent, 'file:other.txt')):
+        with pytest.raises(CoordinationError) as error:
+            store.task('claim', task_id=task['id'], agent='next', resources=[resource_name])
+        assert error.value.code == 'TASK_CONFLICT'
+        listed = {item['id']: item for item in store.task('list')['tasks']}
+        assert listed[task['id']]['status'] == 'queued'
+        assert listed[first['id']]['status'] == 'active'
+    assigned(first, lambda: pc.write_text('shared.txt', 'before'))
+    stale = hashlib.sha256(b'before').hexdigest()
+    assigned(first, lambda: pc.edit_text('shared.txt', 'before', 'first result', stale, False))
+    store.task('finish', task_id=first['id'], lease_token=first['lease_token'], status='completed')
+    second_lease = store.task('claim', task_id=second['id'], agent='next', resources=['file:shared.txt'])
+    assert second_lease['status'] == 'active'
     with pytest.raises(ValueError):
-        assigned(second,lambda:pc.edit_text('shared.txt','before','stale overwrite',stale,False))
-    assert (pc.workspace/'shared.txt').read_text()=='first result'
-    reopened.task('finish',task_id=second['id'],lease_token=second['lease_token'],status='completed')
-    assert reopened.task('renew',task_id=third['id'],lease_token=third['lease_token'])['status']=='active'
-    assert 'lease_token' not in str(reopened.task('list'))
+        assigned(second_lease, lambda: pc.edit_text('shared.txt', 'before', 'stale overwrite', stale, False))
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=independent['id'], agent='next', resources=['file:other.txt'])
+    assert error.value.code == 'TASK_CONFLICT'
+    assert 'lease_token' not in str(store.task('list'))
 
 
-def test_uncertain_owner_blocks_queue_until_review_and_old_token_stays_fenced(pc):
-    now=[1000];store=Coordination(pc,clock=lambda:now[0])
-    first=claim(store,'first',['file:shared.txt'])
-    second=claim(store,'second',['file:shared.txt'])
-    now[0]=1090
-    assert store.task('renew',task_id=second['id'],lease_token=second['lease_token'])['status']=='waiting'
-    now[0]=1121
-    state={t['id']:t for t in store.task('list')['tasks']}
-    assert state[first['id']]['status']=='needs_review'
-    assert state[second['id']]['status']=='waiting'
-    store.task('reconcile',task_id=first['id'],reviewed=True)
-    assert store.task('renew',task_id=second['id'],lease_token=second['lease_token'])['status']=='active'
-    with pytest.raises(CoordinationError):store.validate(store.load()['tasks'][first['id']],first['lease_token'])
+def test_expired_owner_blocks_new_claims_until_review_and_fences_old_token(pc):
+    now = [1000]
+    store = Coordination(pc, clock=lambda: now[0])
+    first = claim(store, 'first', ['file:shared.txt'])
+    second = store.task('create', title='second')
+    now[0] = 1121
+    state = {task['id']: task for task in store.task('list')['tasks']}
+    assert state[first['id']]['status'] == 'needs_review'
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=second['id'], agent='next', resources=['file:shared.txt'])
+    assert error.value.code == 'TASK_REVIEW_REQUIRED'
+    assert next(task for task in store.task('list')['tasks'] if task['id'] == second['id'])['status'] == 'queued'
+    store.task('reconcile', task_id=first['id'], reviewed=True)
+    fresh = store.task('claim', task_id=second['id'], agent='next', resources=['file:shared.txt'])
+    assert fresh['status'] == 'active'
+    with pytest.raises(CoordinationError):
+        store.validate(store.load()['tasks'][first['id']], first['lease_token'])
 
 
-def test_waiting_expiry_and_cancellation_never_grant_stale_token_access(pc):
-    now=[1000];store=Coordination(pc,clock=lambda:now[0])
-    first=claim(store,'first',['file:shared.txt'])
-    expired=claim(store,'expired',['file:shared.txt'])
-    now[0]=1100;store.task('renew',task_id=first['id'],lease_token=first['lease_token'])
-    now[0]=1121
-    assert next(t for t in store.task('list')['tasks'] if t['id']==expired['id'])['status']=='queued'
-    with pytest.raises(CoordinationError):store.task('renew',task_id=expired['id'],lease_token=expired['lease_token'])
-    waiting=claim(store,'cancelled',['file:shared.txt'])
-    with pytest.raises(CoordinationError):store.task('finish',task_id=waiting['id'],lease_token=waiting['lease_token'],status='completed')
-    assert store.task('finish',task_id=waiting['id'],lease_token=waiting['lease_token'],status='failed')['status']=='failed'
-    with pytest.raises(CoordinationError):store.task('renew',task_id=waiting['id'],lease_token=waiting['lease_token'])
+def test_legacy_waiting_records_are_migrated_and_old_tokens_fenced(pc):
+    store = coordinator(pc)
+    holder = claim(store, 'holder', ['workspace'])
+    old_token = 'L' * 43
+    with store.store.locked():
+        data = store.load()
+        data['tasks']['legacy'] = {
+            'id': 'legacy', 'title': 'legacy waiter', 'status': 'waiting',
+            'resources': ['workspace'], 'expires_at': 9999999999,
+            'queue_order': 2, 'agent': 'old assistant',
+            'lease_token': old_token, 'revision': 1, 'note': '',
+        }
+        data['tasks']['expired_queue'] = {
+            'id': 'expired_queue', 'title': 'expired legacy queue item',
+            'status': 'queued', 'resources': [], 'expires_at': 9999999999,
+            'queue_order': 1, 'agent': 'old assistant',
+            'lease_token': '', 'revision': 1, 'note': 'handoff details to preserve',
+        }
+        store.save(data)
+    listed = {task['id']: task for task in store.task('list')['tasks']}
+    legacy = listed['legacy']
+    expired_queue = listed['expired_queue']
+    assert legacy['status'] == 'queued'
+    assert legacy['resources'] == []
+    assert 'agent' not in legacy and 'queue_order' not in legacy
+    assert 'agent' not in expired_queue and 'queue_order' not in expired_queue
+    assert expired_queue['note'] == 'handoff details to preserve'
+    with store.store.locked():
+        assert store.load()['tasks']['legacy']['lease_token'] == ''
+    with pytest.raises(CoordinationError):
+        store.task('renew', task_id='legacy', lease_token=old_token)
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id='legacy', agent='next', resources=['workspace'])
+    assert error.value.code == 'TASK_CONFLICT'
+    store.task('finish', task_id=holder['id'], lease_token=holder['lease_token'], status='completed')
+    fresh = store.task('claim', task_id='legacy', agent='next', resources=['workspace'])
+    assert fresh['status'] == 'active'
+    assert fresh['lease_token'] != old_token
 
 
-def test_earlier_overlapping_waiter_cannot_be_bypassed_but_cancellation_unblocks(pc):
-    store=coordinator(pc)
-    first=claim(store,'first',['file:a.txt'])
-    exclusive=claim(store,'exclusive',['workspace'])
-    later=claim(store,'later',['file:b.txt'])
-    assert exclusive['status']==later['status']=='waiting'
-    store.task('finish',task_id=exclusive['id'],lease_token=exclusive['lease_token'],status='failed')
-    assert store.task('renew',task_id=later['id'],lease_token=later['lease_token'])['status']=='active'
-    assert store.task('renew',task_id=first['id'],lease_token=first['lease_token'])['status']=='active'
+def test_handoff_releases_single_active_slot_without_automatic_promotion(pc):
+    store = coordinator(pc)
+    first = claim(store, 'first', ['file:a.txt'])
+    second = store.task('create', title='second')
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=second['id'], agent='next', resources=['file:b.txt'])
+    assert error.value.code == 'TASK_CONFLICT'
+    store.task('finish', task_id=first['id'], lease_token=first['lease_token'], status='queued')
+    assert next(task for task in store.task('list')['tasks'] if task['id'] == second['id'])['status'] == 'queued'
+    fresh = store.task('claim', task_id=second['id'], agent='next', resources=['file:b.txt'])
+    assert fresh['status'] == 'active'
 
 
-def test_eight_simultaneous_independent_claims_are_persisted_without_overlap(pc):
-    store=coordinator(pc)
-    ids=[store.task('create',title=str(i))['id'] for i in range(8)]
+def test_simultaneous_disjoint_claims_have_one_winner_and_no_waiter(pc):
+    store = coordinator(pc)
+    identifiers = [store.task('create', title=str(i))['id'] for i in range(2)]
+    peers = [Coordination(pc), Coordination(pc)]
     def reserve(pair):
-        index,identifier=pair
-        return Coordination(pc).task('claim',task_id=identifier,agent=str(index),resources=[f'file:{index}.txt'])
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results=list(pool.map(reserve,enumerate(ids)))
-    assert all(t['status']=='active' for t in results)
-    assert len({t['lease_token'] for t in results})==8
-    assert len(Coordination(pc).task('list')['tasks'])==8
-
+        peer, identifier = pair
+        try:
+            return peer.task('claim', task_id=identifier, agent='single-assistant', resources=[f'file:{identifier}.txt'])
+        except CoordinationError as error:
+            return error.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(reserve, zip(peers, identifiers)))
+    assert sum(isinstance(result, dict) and result['status'] == 'active' for result in results) == 1
+    assert results.count('TASK_CONFLICT') == 1
+    statuses = {task['id']: task['status'] for task in store.task('list')['tasks']}
+    assert sorted(statuses.values()) == ['active', 'queued']
+    assert 'waiting' not in statuses.values()
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows short-name aliases')
 def test_short_alias_cannot_bypass_reservation(pc):
@@ -162,56 +206,64 @@ def test_short_alias_rejected_by_shared_path_policy(pc):
     assert parts('normal-file.txt') == ('normal-file.txt',)
 
 
-def test_conflict_scope_hash_and_tokens_are_enforced_on_old_tools(pc):
+
+def test_conflict_scope_hash_and_tokens_are_enforced_in_single_assistant_mode(pc):
     store = coordinator(pc)
-    a = claim(store, 'ChatGPT', ['file:a.txt'])
-    b = claim(store, 'Claude', ['file:b.txt'])
-    assigned(a, lambda: pc.write_text('a.txt', 'before'))
-    assigned(b, lambda: pc.write_text('b.txt', 'independent'))
-    with pytest.raises(CoordinationError, match='reserved'):
+    first = claim(store, 'ChatGPT', ['file:a.txt'])
+    second = store.task('create', title='second task')
+    assigned(first, lambda: pc.write_text('a.txt', 'before'))
+    with pytest.raises(CoordinationError, match='owns this resource'):
         pc.write_text('a.txt', 'other')
     with pytest.raises(CoordinationError, match='exceeds'):
-        assigned(b, lambda: pc.write_text('a.txt', 'wrong'))
+        assigned(first, lambda: pc.write_text('b.txt', 'wrong'))
     with pytest.raises(CoordinationError):
-        assigned({**a, 'lease_token': 'wrong'}, lambda: pc.write_text('a.txt', 'wrong'))
+        assigned({**first, 'lease_token': 'wrong'}, lambda: pc.write_text('a.txt', 'wrong'))
     stale = hashlib.sha256(b'before').hexdigest()
     (pc.workspace / 'a.txt').write_text('changed by user')
     with pytest.raises(ValueError):
-        assigned(a, lambda: pc.edit_text('a.txt', 'before', 'after', stale, False))
+        assigned(first, lambda: pc.edit_text('a.txt', 'before', 'after', stale, False))
     assert (pc.workspace / 'a.txt').read_text() == 'changed by user'
     assert 'lease_token' not in str(store.task('list'))
-    assert b'ChatGPT' not in store.store.tree.read('tasks.enc')
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=second['id'], agent='second', resources=['file:b.txt'])
+    assert error.value.code == 'TASK_CONFLICT'
+    store.task('finish', task_id=first['id'], lease_token=first['lease_token'], status='completed')
+    second_lease = store.task('claim', task_id=second['id'], agent='second', resources=['file:b.txt'])
+    assigned(second_lease, lambda: pc.write_text('b.txt', 'independent'))
+    assert (pc.workspace / 'b.txt').read_text() == 'independent'
 
 
-def test_simultaneous_claim_one_winner_and_ui_commands_exclusion(pc):
+def test_simultaneous_claims_have_one_winner_and_block_workspace_commands(pc):
     store = coordinator(pc)
-    ids = [store.task('create', title=str(i))['id'] for i in range(2)]
+    identifiers = [store.task('create', title=str(i))['id'] for i in range(2)]
     peers = [Coordination(pc), Coordination(pc)]
     def attempt(pair):
         peer, identifier = pair
         try:
-            return peer.task('claim', task_id=identifier, agent='worker', resources=['ui'])
-        except CoordinationError:
-            return None
+            return peer.task('claim', task_id=identifier, agent='single-assistant', resources=['workspace'])
+        except CoordinationError as error:
+            return error.code
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(attempt, zip(peers, ids)))
-    assert sorted(r['status'] for r in results)==['active','waiting']
-    assert claim(store, 'shell', ['workspace'])['status']=='waiting'
+        results = list(pool.map(attempt, zip(peers, identifiers)))
+    assert sum(isinstance(result, dict) and result['status'] == 'active' for result in results) == 1
+    assert results.count('TASK_CONFLICT') == 1
     with pytest.raises(CoordinationError):
         pc.start_program('not-run', [])
 
 
-def test_expiry_persists_uncertainty_and_reconciliation_fences_old_token(pc):
+def test_expiry_requires_review_and_reconciliation_fences_old_token(pc):
     now = [1000]
     store = Coordination(pc, clock=lambda: now[0])
     old = claim(store, 'old', ['file:nested'])
+    other = store.task('create', title='other')
     now[0] += 121
     assert store.task('list')['tasks'][0]['status'] == 'needs_review'
-    other=claim(store, 'other', ['file:nested/a.txt'])
-    assert other['status']=='waiting'
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=other['id'], agent='next', resources=['file:nested/a.txt'])
+    assert error.value.code == 'TASK_REVIEW_REQUIRED'
+    assert next(task for task in store.task('list')['tasks'] if task['id'] == other['id'])['status'] == 'queued'
     reopened = Coordination(pc, clock=lambda: now[0])
     assert reopened.task('list')['tasks'][0]['status'] == 'needs_review'
-    reopened.task('finish',task_id=other['id'],lease_token=other['lease_token'],status='failed')
     reopened.task('reconcile', task_id=old['id'], reviewed=True)
     fresh = reopened.task('claim', task_id=old['id'], agent='new', resources=['file:nested'])
     assert fresh['lease_token'] != old['lease_token']
@@ -219,29 +271,37 @@ def test_expiry_persists_uncertainty_and_reconciliation_fences_old_token(pc):
         reopened.task('renew', task_id=old['id'], lease_token=old['lease_token'])
 
 
-def test_more_than_three_independent_assignments_and_traversal_denied(pc):
+def test_single_active_assignment_and_path_traversal_are_enforced(pc):
     store = coordinator(pc)
-    for i in range(3):
-        claim(store, str(i), [f'file:{i}.txt'])
-    assert claim(store, 'fourth', ['file:fourth.txt'])['status']=='active'
+    first = claim(store, 'first', ['file:0.txt'])
+    second = store.task('create', title='second')
+    with pytest.raises(CoordinationError) as error:
+        store.task('claim', task_id=second['id'], agent='next', resources=['file:1.txt'])
+    assert error.value.code == 'TASK_CONFLICT'
+    unsafe = store.task('create', title='unsafe')
     with pytest.raises(ValueError):
-        claim(Coordination(pc), 'unsafe', ['file:../outside'])
+        store.task('claim', task_id=unsafe['id'], agent='unsafe', resources=['file:../outside'])
+    store.task('finish', task_id=first['id'], lease_token=first['lease_token'], status='completed')
+    assert store.task('claim', task_id=second['id'], agent='next', resources=['file:1.txt'])['status'] == 'active'
 
 
 def test_running_process_must_stop_before_handoff_or_new_assignments(pc):
     store = coordinator(pc)
     lease = claim(store, 'process worker', ['workspace'])
     result = assigned(lease, lambda: pc.start_program(sys.executable, ['-c', 'import time; time.sleep(30)']))
+    second = store.task('create', title='parallel')
     try:
         with pytest.raises(CoordinationError, match='Stop'):
             store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'], status='completed')
-        waiting=claim(store, 'parallel', ['file:x.txt'])
-        assert waiting['status']=='waiting'
+        with pytest.raises(CoordinationError) as error:
+            store.task('claim', task_id=second['id'], agent='next', resources=['file:x.txt'])
+        assert error.value.code == 'TASK_CONFLICT'
+        assert next(task for task in store.task('list')['tasks'] if task['id'] == second['id'])['status'] == 'queued'
     finally:
         pc.stop_session(result['session_id'])
     assert store.task('finish', task_id=lease['id'], lease_token=lease['lease_token'], status='completed')['status'] == 'completed'
-    assert store.task('renew',task_id=waiting['id'],lease_token=waiting['lease_token'])['status']=='active'
-
+    assigned_second = store.task('claim', task_id=second['id'], agent='next', resources=['file:x.txt'])
+    assert assigned_second['status'] == 'active'
 
 def test_recent_history_prunes_only_finished_tasks(pc):
     store = coordinator(pc)

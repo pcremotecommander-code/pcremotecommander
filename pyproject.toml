@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jan-mcp-commander"
-version = "0.7.0rc1"
+version = "0.7.0b49.post1"
 description = "Secure remote computer access through AI; workspace-scoped MCP tools"
 requires-python = ">=3.11"
 dependencies = ["mcp==2.3.0", "cryptography==50.0.2", "uvicorn==0.54.0", "pypdf==6.21.4", "pypdfium2==5.14.0", "Pillow==13.0.0", "pywin32==312; sys_platform == 'win32'"]

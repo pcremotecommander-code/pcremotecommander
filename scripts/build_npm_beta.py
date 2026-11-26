@@ -14,7 +14,7 @@ from build_source_preview import ROOT
 
 
 NAME = "pcremotecommander"
-VERSION = "0.7.0-beta.45"
+VERSION = "0.7.0-beta.49.1"
 PDFIUM_WHEEL = ROOT/'work/dependency-wheels/pypdfium2-5.14.0-py3-none-win_amd64.whl'
 PDFIUM_SHA256 = '149fd5c6397b8df8bf7911a93506eff0be874f877afe7ac936cf5d37d21a6a06'
 PDF_WHEEL = ROOT/'work/dependency-wheels/pypdf-6.21.4-py3-none-any.whl'
@@ -25,6 +25,14 @@ PILLOW_SHA256='f7cbb7a64e7ec664775195e4f81923bc8a93d9451b963f844e59118f63147a7a'
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def install_bundle_dependencies(destination: Path) -> None:
+    subprocess.run(
+        ["npm.cmd", "install", "--ignore-scripts", "--no-audit", "--no-fund"],
+        cwd=destination,
+        check=True,
+    )
 
 
 def install_pillow(destination,manifest):
@@ -136,6 +144,7 @@ def build(base: Path, destination: Path) -> dict:
         raise ValueError("Task MCP server build did not produce main.js")
     (task_target / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
     manifest["deploy/mcp-task-server/package.json"] = digest(task_target / "package.json")
+    task_metadata = json.loads((task_source / "package.json").read_text(encoding="utf-8"))
     package = {
         "name": NAME,
         "version": VERSION,
@@ -144,12 +153,13 @@ def build(base: Path, destination: Path) -> dict:
         "bin": {NAME: "bin/npx-onboard.cjs"},
         "os": ["win32"],
         "engines": {"node": ">=20"},
-        "dependencies": {"ws": "8.22.0", **json.loads((task_source / "package.json").read_text(encoding="utf-8"))["dependencies"]},
-        "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod"],
+        "dependencies": {"ws": "8.22.0", **task_metadata["dependencies"]},
+        "bundleDependencies": ["ws", "@modelcontextprotocol/server", "@modelcontextprotocol/client", "@modelcontextprotocol/node", "zod", "hono", "@hono/node-server"],
         "publishConfig": {"access": "public", "tag": "beta"},
         "files": ["bin", "project", "runtime", "SOURCE-MANIFEST.json"],
     }
     (destination / "package.json").write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+    install_bundle_dependencies(destination)
     shutil.copy2(ROOT / "deploy/npm/launcher/LICENSE.txt", destination / "LICENSE.txt")
     (destination / "README.md").write_text(
         "# PC Remote Commander Windows beta\n\n"
