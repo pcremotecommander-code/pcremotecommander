@@ -1,6 +1,6 @@
 {
   "name": "jan-mcp-commander-launcher",
-  "version": "0.7.0-rc.3",
+  "version": "0.7.0-beta.49.1",
   "private": true,
   "description": "Local source launcher for the installed PC Remote Commander CLI",
   "bin": {
