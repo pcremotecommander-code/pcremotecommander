@@ -5,7 +5,7 @@ import {deviceDashboard} from '../src/portal_ui.ts';
 test('post-approval dashboard checks immediately and reloads when delayed device registration arrives',async()=>{
   const html=await deviceDashboard({devices:[],calls:0,plan:'free',billing:[],monthly:{used:0,limit:15000,resetsAt:Date.now()+1000}},{login:'test',csrf:'synthetic'},'https://ui.example.workers.dev','approved',true).text();
   const javascript=[...html.matchAll(/<script nonce="[^"]+">([\s\S]*?)<\/script>/g)].map(item=>item[1]).find(item=>item.includes("getElementById('live-status')"));
-  assert.ok(javascript);assert.match(html,/Connection status updates automatically/);
+  assert.ok(javascript);assert.match(html,/Beta\.49\.1 · Remote MCP/);assert.match(html,/Connection status updates automatically/);
   assert.match(html,/Prompt Library/);assert.match(html,/\/brand\/chatgpt.png/);assert.doesNotMatch(html,/>Cl<|aria-hidden="true">MCP/);
   const timers=new Map();let nextTimer=0,reads=0,reloads=0;const live={textContent:''};
   const document={hidden:false,body:{dataset:{deviceIds:''}},querySelectorAll:()=>[],getElementById:id=>id==='live-status'?live:null,querySelector:selector=>selector==='.dashboard-layout'?{dataset:{plan:'free',billingState:'[]'}}:null,addEventListener(){}};
