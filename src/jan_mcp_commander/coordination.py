@@ -98,8 +98,8 @@ class Coordination:
             self.expire(data)
             tasks = data['tasks']
             if action == 'list':
-                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review','waiting'}]
-                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review','waiting'}]
+                held = [t for t in tasks.values() if t['status'] in {'active', 'needs_review'}]
+                recent = [t for t in tasks.values() if t['status'] not in {'active', 'needs_review'}]
                 shown = held + recent[-max(1, 20 - len(held)):]
                 return {'tasks': [{**self.public(t), 'note': t['note'][:400]} for t in shown[:20]], 'truncated': len(tasks) > 20}
             if action == 'create':
