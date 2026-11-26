@@ -31,6 +31,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14'
+      - name: Install pinned Worker build dependencies
+        run: npm ci --prefix deploy/cloudflare/worker --ignore-scripts
       - name: Build Beta49.1 POSIX archive and checksum-pinned installer
         run: |
           python scripts/build_posix_candidate.py "$RUNNER_TEMP/pcrc-beta49.1-posix" 0.7.0-beta.49.1
