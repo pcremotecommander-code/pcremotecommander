@@ -236,7 +236,7 @@ class Coordination:
                         )
                     raise CoordinationError(
                         'TASK_CONFLICT',
-                        f"Task {task['id']} currently owns this resource. Finish it before retrying; no operation was run.",
+                        f"Task {task['id']} currently owns this resource (it is reserved). Finish it before retrying; no operation was run.",
                     )
             marker = self.depth.set(True)
             try:
