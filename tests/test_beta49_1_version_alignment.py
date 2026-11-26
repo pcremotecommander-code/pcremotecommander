@@ -26,3 +26,10 @@ def test_beta49_1_release_metadata_is_aligned():
     assert package["version"] == NPM_VERSION
     assert lock["version"] == NPM_VERSION
     assert lock["packages"][""]["version"] == NPM_VERSION
+
+    task_package = json.loads((ROOT / "deploy/mcp-task-server/package.json").read_text(encoding="utf-8"))
+    task_lock = json.loads((ROOT / "deploy/mcp-task-server/package-lock.json").read_text(encoding="utf-8"))
+    expected_overrides = {"hono": "4.13.22", "@hono/node-server": "2.1.11"}
+    assert task_package["overrides"] == expected_overrides
+    assert task_lock["packages"]["node_modules/hono"]["version"] == "4.13.22"
+    assert task_lock["packages"]["node_modules/@hono/node-server"]["version"] == "2.1.11"
