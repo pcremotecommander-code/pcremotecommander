@@ -1,0 +1,63 @@
+name: Beta49.1 POSIX candidate artifact
+
+on:
+  pull_request:
+    branches: [release/beta49-single-assistant-rc1]
+    paths:
+      - 'scripts/build_posix_candidate.py'
+      - 'scripts/install-posix.sh.in'
+      - 'setup-linux.sh'
+      - 'setup-macos.sh'
+      - 'src/jan_mcp_commander/**'
+      - 'deploy/mcp-task-server/**'
+      - 'deploy/npm/jan-commander/**'
+      - '.github/workflows/beta49-posix-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-posix:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - name: Build Beta49.1 POSIX archive and checksum-pinned installer
+        run: |
+          python scripts/build_posix_candidate.py "$RUNNER_TEMP/pcrc-beta49.1-posix" 0.7.0-beta.49.1
+          cd "$RUNNER_TEMP/pcrc-beta49.1-posix"
+          sha256sum pcremotecommander-0.7.0-beta.49.1-posix.zip install-0.7.0-beta.49.1-posix.sh > SHA256SUMS.txt
+          python - <<'PY'
+          import hashlib, pathlib, zipfile
+          root = pathlib.Path('.')
+          archive = root / 'pcremotecommander-0.7.0-beta.49.1-posix.zip'
+          with zipfile.ZipFile(archive) as z:
+              bad = [n for n in z.namelist() if n.startswith('/') or '..' in pathlib.PurePosixPath(n).parts]
+              assert not bad, bad[:10]
+              required = ['pyproject.toml', 'setup-linux.sh', 'setup-macos.sh', 'src/jan_mcp_commander/__init__.py']
+              names = set(z.namelist())
+              assert all(name in names for name in required)
+              init = z.read('src/jan_mcp_commander/__init__.py').decode()
+              assert '__version__ = "0.7.0-beta.49.1"' in init
+          installer = (root / 'install-0.7.0-beta.49.1-posix.sh').read_text()
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          assert digest in installer
+          print(f'archive_bytes={archive.stat().st_size}')
+          print(f'archive_sha256={digest}')
+          print(f'entries={len(names)}')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pcrc-beta49.1-posix-candidate
+          path: ${{ runner.temp }}/pcrc-beta49.1-posix/*
+          if-no-files-found: error
+          retention-days: 14
